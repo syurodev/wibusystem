@@ -1,0 +1,340 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+## Quy tắc chung
+
+### 1. Ngôn ngữ lập trình
+
+- Sử dụng TypeScript cho tất cả các dự án
+- Luôn định nghĩa kiểu dữ liệu rõ ràng, tránh sử dụng `any`
+- Sử dụng các tính năng mới nhất của TypeScript (khi phù hợp)
+- Sử dụng các types của Bun thay vì node khi có thể
+
+### 2. Định dạng code
+
+- Sử dụng Prettier để định dạng code
+- Sử dụng 2 spaces cho indentation
+- Sử dụng dấu chấm phẩy (;) ở cuối mỗi câu lệnh
+- Sử dụng dấu ngoặc nhọn ({}) cho tất cả các block, kể cả khi chỉ có một câu lệnh
+
+```typescript
+// Không tốt
+if (condition) doSomething();
+
+// Tốt
+if (condition) {
+  doSomething();
+}
+```
+
+### 3. Đặt tên
+
+- Sử dụng tên có ý nghĩa, dễ hiểu
+- Tránh sử dụng tên viết tắt, trừ khi chúng phổ biến (ví dụ: HTTP, URL)
+- Tránh sử dụng tên quá dài hoặc quá ngắn
+
+#### Quy ước đặt tên
+
+- **Files**: kebab-case (ví dụ: `user-service.ts`)
+- **Data Field**: snake_case (ví dụ: `is_active`)
+- **Classes**: PascalCase (ví dụ: `UserService`)
+- **Interfaces/Types**: PascalCase (ví dụ: `UserInterface`)
+- **Functions/Methods**: camelCase (ví dụ: `getUserById`)
+- **Variables**: camelCase (ví dụ: `userName`)
+- **Constants**: UPPER_SNAKE_CASE (ví dụ: `MAX_USERS`)
+- **Enums**: PascalCase cho tên enum, UPPER_SNAKE_CASE cho các giá trị (ví dụ: `enum UserRole { ADMIN = 0, USER = 1 }`)
+- **Components React**: PascalCase (ví dụ: `UserProfile`)
+
+### 4. Comments
+
+- Viết comments cho các đoạn code phức tạp
+- Sử dụng JSDoc để mô tả các functions, classes, interfaces
+- Tránh comments không cần thiết cho các đoạn code đơn giản
+- Cập nhật comments khi code thay đổi
+
+```typescript
+/**
+ * Lấy thông tin người dùng theo ID
+ * @param id ID của người dùng
+ * @returns Thông tin người dùng hoặc null nếu không tìm thấy
+ */
+async function getUserById(id: string): Promise<User | null> {
+  // Implementation
+}
+```
+
+### 5. Imports
+
+- Sắp xếp imports theo thứ tự:
+  1. External packages
+  2. Internal packages
+  3. Local files
+- Sử dụng destructuring khi import nhiều thành phần từ cùng một module
+- Các packages dùng chung trong dự án sẻ được import từ `@repo/{tên package}`
+
+```typescript
+// External packages
+import { Elysia } from "elysia";
+
+// Internal packages
+import { HttpStatusCode, MessageCode } from "@repo/common";
+import { PostgresConfig } from "@repo/config";
+
+// Local files
+import { UserService } from "./services/user.service";
+import { validateUser } from "./validations/user";
+```
+
+## Quy tắc TypeScript
+
+### 1. Types
+
+- Luôn định nghĩa kiểu dữ liệu rõ ràng cho parameters, return values, và variables
+- Tránh sử dụng `any` khi có thể
+- Sử dụng interfaces cho objects có cấu trúc phức tạp
+- Sử dụng type aliases cho union types, intersection types, và các kiểu dữ liệu phức tạp khác
+- Sử dụng generics khi cần thiết để tăng tính tái sử dụng của code
+
+```typescript
+// Interfaces
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  createdAt: Date;
+}
+
+// Type aliases
+type UserRole = "admin" | "user" | "guest";
+
+// Generics
+function getFirstItem<T>(items: T[]): T | undefined {
+  return items.length > 0 ? items[0] : undefined;
+}
+```
+
+### 2. Enums
+
+- Sử dụng numeric enums thay vì string enums
+- Luôn gán giá trị rõ ràng cho các enum members
+- Sử dụng UPPER_SNAKE_CASE cho các enum members
+
+```typescript
+enum UserRole {
+  ADMIN = 0,
+  USER = 1,
+  GUEST = 2,
+}
+
+enum HttpStatusCode {
+  OK = 200,
+  BAD_REQUEST = 400,
+  UNAUTHORIZED = 401,
+  FORBIDDEN = 403,
+  NOT_FOUND = 404,
+  INTERNAL_SERVER_ERROR = 500,
+}
+```
+
+### 3. Null và Undefined
+
+- Sử dụng `undefined` thay vì `null` khi có thể
+- Sử dụng optional chaining (`?.`) và nullish coalescing (`??`) để xử lý null và undefined
+- Tránh sử dụng non-null assertion operator (`!`) khi có thể
+
+```typescript
+// Không tốt
+function getUserName(user: User | null): string {
+  return user!.name; // Có thể gây lỗi nếu user là null
+}
+
+// Tốt
+function getUserName(user: User | undefined): string {
+  return user?.name ?? "Unknown";
+}
+```
+
+### 4. Type Guards
+
+- Sử dụng type guards để thu hẹp kiểu dữ liệu
+- Tạo các custom type guards khi cần thiết
+
+```typescript
+// Type guard
+function isUser(obj: any): obj is User {
+  return obj && typeof obj === "object" && "id" in obj && "name" in obj;
+}
+
+// Sử dụng type guard
+function processEntity(entity: User | Post) {
+  if (isUser(entity)) {
+    // TypeScript biết entity là User ở đây
+    console.log(entity.name);
+  } else {
+    // TypeScript biết entity là Post ở đây
+    console.log(entity.title);
+  }
+}
+```
+
+### 5. Utility Types
+
+- Sử dụng các utility types của TypeScript khi phù hợp (Partial, Readonly, Pick, Omit, v.v.)
+
+```typescript
+// Partial
+function updateUser(id: string, data: Partial<User>): Promise<User> {
+  // Implementation
+}
+
+// Pick
+type UserCredentials = Pick<User, "email" | "password">;
+
+// Omit
+type UserPublicInfo = Omit<User, "password" | "token">;
+```
+
+## Quy tắc cho Backend (Elysia.js)
+
+### 1. Cấu trúc dự án
+
+- Tổ chức code theo mô hình MVC (Model-View-Controller)
+- Tách biệt rõ ràng giữa routes, controllers, services, và repositories
+- Sử dụng dependency injection khi có thể
+
+```
+apps/novel-service/
+├── src/
+│   ├── database/         # Kết nối database, migrations (nếu có)
+│   │   └── connection.ts # File kết nối DB
+│   ├── examples/         # Thư mục ví dụ (tương tự User Service)
+│   ├── grpc-server.ts    # File gRPC server (tương tự User Service, nội dung cần điều chỉnh cho Novel Service nếu cần)
+│   ├── index.ts          # Entry point của Novel Service, khởi tạo Elysia app
+│   ├── middlewares/      # Middlewares dùng chung cho Novel Service
+│   │   └── error.middleware.ts # Ví dụ
+│   ├── modules/          # Chứa các module nghiệp vụ, ví dụ theo phiên bản API
+│   │   ├── v1/           # Module cho API v1
+│   │   │   ├── novels/          # Resource: Tiểu thuyết
+│   │   │   │   ├── controllers/
+│   │   │   │   │   └── novel.controller.ts
+│   │   │   │   ├── services/
+│   │   │   │   │   └── novel.service.ts
+│   │   │   │   └── validations/
+│   │   │   │       └── novel.validation.ts
+│   │   │   ├── chapters/        # Resource: Chương
+│   │   │   │   ├── controllers/
+│   │   │   │   │   └── chapter.controller.ts
+│   │   │   │   ├── services/
+│   │   │   │   │   └── chapter.service.ts
+│   │   │   │   └── validations/
+│   │   │   │       └── chapter.validation.ts
+│   │   │   ├── authors/         # Resource: Tác giả
+│   │   │   │   ├── controllers/
+│   │   │   │   │   └── author.controller.ts
+│   │   │   │   ├── services/
+│   │   │   │   │   └── author.service.ts
+│   │   │   │   └── validations/
+│   │   │   │       └── author.validation.ts
+│   │   │   ├── genres/          # Resource: Thể loại
+│   │   │   │   ├── controllers/
+│   │   │   │   │   └── genre.controller.ts
+│   │   │   │   ├── services/
+│   │   │   │   │   └── genre.service.ts
+│   │   │   │   └── validations/
+│   │   │   │       └── genre.validation.ts
+│   │   │   ├── volumes/         # Resource: Tập
+│   │   │   │   ├── controllers/
+│   │   │   │   │   └── volume.controller.ts
+│   │   │   │   ├── services/
+│   │   │   │   │   └── volume.service.ts
+│   │   │   │   └── validations/
+│   │   │   │       └── volume.validation.ts
+│   │   │   ├── interactions/    # Resource: Tương tác người dùng (favorites, votes, etc.)
+│   │   │   │   ├── controllers/
+│   │   │   │   │   └── user_interaction.controller.ts
+│   │   │   │   ├── services/
+│   │   │   │   │   └── user_interaction.service.ts
+│   │   │   │   └── validations/
+│   │   │   │       └── user_interaction.validation.ts
+│   │   │   ├── stats/           # Resource: Thống kê (view tracking)
+│   │   │   │   ├── controllers/
+│   │   │   │   │   └── view_tracking.controller.ts // Hoặc stats.controller.ts
+│   │   │   │   ├── services/
+│   │   │   │   │   └── view_tracking.service.ts    // Hoặc stats.service.ts
+│   │   │   │   └── validations/
+│   │   │   │       └── view_tracking.validation.ts // Hoặc stats.validation.ts
+│   │   │   └── index.ts         # Gom tất cả các route của các resource trong v1
+│   │   └── index.ts           # Gom tất cả các module phiên bản (v1, v2, ...)
+│   ├── plugins/          # Elysia plugins (nếu có, tương tự User Service)
+│   ├── repositories/     # Tương tác với database
+│   │   ├── novels/         # Đặt tên theo bảng/thực thể 'lightnovels'
+│   │   │   ├── models/       # Chứa các file ánh xạ/format dữ liệu từ DB
+│   │   │   │   ├── detail-novel.model.ts
+│   │   │   │   ├── basic-novel.model.ts
+│   │   │   │   └── ... (các model ánh xạ khác nếu cần thiết)
+│   │   │   └── novels.repository.ts    # File repository chính cho tiểu thuyết
+│   │   ├── chapters/       # Đặt tên theo bảng/thực thể 'chapters'
+│   │   │   ├── models/
+│   │   │   │   ├── detail-chapter.model.ts
+│   │   │   │   ├── basic-chapter.model.ts
+│   │   │   │   └── ...
+│   │   │   └── chapters.repository.ts
+│   │   ├── authors/        # Đặt tên theo bảng/thực thể 'authors'
+│   │   │   ├── models/
+│   │   │   │   └── author.model.ts     # Model cho tác giả
+│   │   │   └── authors.repository.ts
+│   │   ├── genres/         # Đặt tên theo bảng/thực thể 'genres'
+│   │   │   ├── models/
+│   │   │   │   └── genre.model.ts      # Model cho thể loại
+│   │   │   └── genres.repository.ts
+│   │   ├── volumes/        # Đặt tên theo bảng/thực thể 'volumes'
+│   │   │   ├── models/
+│   │   │   │   ├── detail-volume.model.ts
+│   │   │   │   └── basic-volume.model.ts
+│   │   │   └── volumes.repository.ts
+│   │   ├── user-interactions/  # Repository cho các bảng tương tác người dùng
+│   │   │   ├── models/
+│   │   │   │   ├── favorite.model.ts
+│   │   │   │   ├── vote.model.ts
+│   │   │   │   ├── reading-history.model.ts
+│   │   │   │   └── bookmark.model.ts
+│   │   │   └── user-interactions.repository.ts
+│   │   ├── view-stats/         # Repository cho các bảng thống kê lượt xem
+│   │   │   ├── models/
+│   │   │   │   └── view-stat.model.ts
+│   │   │   └── view-stats.repository.ts
+│   │   └── types.ts          # Định nghĩa các kiểu dữ liệu đầu vào chung cho các phương thức repository (CreateData, UpdateData, QueryOptions)
+│   ├── scripts/          # Các scripts tiện ích (tương tự User Service)
+│   ├── types/            # Type definitions & Enums dùng chung trong Novel Service
+│   │   └── enums.ts      # Ví dụ: NovelStatus, ChapterStatus
+│   └── utils/            # Các hàm tiện ích
+│       └── response-formatter.ts # Ví dụ
+├── .env.example
+├── .gitignore
+├── package.json
+└── tsconfig.json
+```
+
+### 2. Controllers
+
+- Controllers chỉ nên xử lý request và response
+- Không nên có business logic trong controllers
+- Sử dụng services cho business logic
+- Mỗi controller chỉ nên xử lý một resource
+
+### 3. Services
+
+- Services chứa business logic
+- Sử dụng Singleton pattern cho services
+- Services nên độc lập với framework
+
+### 4. Repositories
+
+- Repositories chịu trách nhiệm tương tác với database
+- Mỗi repository chỉ nên xử lý một entity
+- Repositories nên trả về plain objects, không phải ORM models
+- Viết các class để hứng dữ liệu trả về từ database nếu cần

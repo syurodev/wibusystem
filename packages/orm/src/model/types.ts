@@ -153,3 +153,8 @@ export interface ModelMetadata {
  * Lưu trữ metadata của các model
  */
 export const MODEL_REGISTRY = new Map<string, ModelMetadata>();
+
+/**
+ * Represents a constructor of a class.
+ */
+export type Constructor<T = object> = new (...args: any[]) => T;

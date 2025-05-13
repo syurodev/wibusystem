@@ -1,5 +1,6 @@
-import { convertToMillis } from "@repo/common";
-import { Column, PrimaryGeneratedColumn } from "./decorators";
+import { convertFromMillis, formatMillis } from "@repo/common";
+import { ModelManager } from "./model-manager";
+import type { Constructor } from "./types";
 import { PostgresDataType } from "./types";
 
 /**
@@ -15,10 +16,7 @@ export abstract class BaseEntity {
   /**
    * ID tự động tăng
    */
-  @PrimaryGeneratedColumn({
-    description: "ID tự động tăng",
-  })
-  id!: number;
+  id!: string | number;
 
   /**
    * Thời gian tạo (Unix timestamp - milliseconds)
@@ -32,25 +30,118 @@ export abstract class BaseEntity {
    * default: () => toMillisFromDateTime(now()),
    * ```
    */
-  @Column({
-    type: PostgresDataType.BIGINT,
-    nullable: false,
-    description: "Thời gian tạo (Unix timestamp - milliseconds)",
-    default: () => convertToMillis(new Date()),
-  })
-  createdAt!: number;
+  createdAt: Date = new Date();
 
   /**
    * Thời gian cập nhật (Unix timestamp - milliseconds)
    * Sẽ được cập nhật tự động khi entity được cập nhật
    */
-  @Column({
-    type: PostgresDataType.BIGINT,
-    nullable: false,
-    description: "Thời gian cập nhật (Unix timestamp - milliseconds)",
-    default: () => convertToMillis(new Date()),
-  })
-  updatedAt!: number;
+  updatedAt: Date = new Date();
+
+  constructor(data?: Partial<any>) {
+    if (data) {
+      const dataCopy = { ...data };
+      if (typeof dataCopy.createdAt === "number") {
+        dataCopy.createdAt = convertFromMillis(dataCopy.createdAt);
+      }
+      if (typeof dataCopy.updatedAt === "number") {
+        dataCopy.updatedAt = convertFromMillis(dataCopy.updatedAt);
+      }
+      Object.assign(this, dataCopy);
+    }
+    if (!(this.createdAt instanceof Date)) {
+      this.createdAt = new Date();
+    }
+    if (!(this.updatedAt instanceof Date)) {
+      this.updatedAt = new Date();
+    }
+  }
+
+  /**
+   * Updates the updatedAt timestamp to the current time.
+   */
+  protected updateTimestamp(): void {
+    this.updatedAt = new Date();
+  }
+
+  /**
+   * Returns the createdAt timestamp as a Date object or a custom formatted string.
+   * @param converter Optional function to format the Date object.
+   */
+  public getCreatedAtConverted<T>(converter?: (date: Date) => T): T | Date {
+    return converter ? converter(this.createdAt) : this.createdAt;
+  }
+
+  /**
+   * Returns the updatedAt timestamp as a Date object or a custom formatted string.
+   * @param converter Optional function to format the Date object.
+   */
+  public getUpdatedAtConverted<T>(converter?: (date: Date) => T): T | Date {
+    return converter ? converter(this.updatedAt) : this.updatedAt;
+  }
+
+  /**
+   * Converts the entity to a JSON object.
+   * Date objects are converted to ISO strings.
+   * Numeric timestamps (if any unconverted ones exist on properties) are also converted to ISO strings.
+   */
+  public toJSON(): Record<string, unknown> {
+    const jsonData: Record<string, unknown> = {};
+    let metadata;
+    try {
+      metadata = ModelManager.getModelMetadata(
+        this.constructor as Constructor<this>
+      );
+    } catch (error) {
+      Object.getOwnPropertyNames(this).forEach((prop) => {
+        if (typeof (this as any)[prop] !== "function") {
+          const value = (this as any)[prop];
+          if (value instanceof Date) {
+            jsonData[prop] = value.toISOString();
+          } else {
+            jsonData[prop] = value;
+          }
+        }
+      });
+      return jsonData;
+    }
+
+    for (const propertyName in metadata.columns) {
+      if (
+        Object.prototype.hasOwnProperty.call(metadata.columns, propertyName)
+      ) {
+        const columnDef = metadata.columns[propertyName];
+        const propValue = (this as any)[propertyName];
+
+        if (propValue === undefined || propValue === null) {
+          jsonData[propertyName] = propValue;
+          continue;
+        }
+
+        if (propValue instanceof Date) {
+          jsonData[propertyName] = propValue.toISOString();
+        } else if (
+          columnDef &&
+          (columnDef.type === PostgresDataType.DATE ||
+            columnDef.type === PostgresDataType.TIMESTAMP ||
+            columnDef.type === PostgresDataType.TIMESTAMPTZ) &&
+          typeof propValue === "number"
+        ) {
+          try {
+            jsonData[propertyName] = convertFromMillis(propValue).toISOString();
+          } catch (e) {
+            ModelManager.loggerService?.warn(
+              `Failed to convert numeric timestamp to ISO string for ${propertyName}: ${String(e)}`
+            );
+            jsonData[propertyName] = propValue;
+          }
+        } else {
+          jsonData[propertyName] = propValue;
+        }
+      }
+    }
+    return jsonData;
+  }
 
   /**
    * Chuyển đổi createdAt thành đối tượng Date
@@ -69,121 +160,24 @@ export abstract class BaseEntity {
   }
 
   /**
-   * Cập nhật trường updatedAt thành thời gian hiện tại
-   *
-   * Lưu ý: Trong thực tế, bạn nên sử dụng hàm từ @repo/common như sau:
-   * ```
-   * import { now, toMillisFromDateTime } from "@repo/common/utils/date";
-   *
-   * // Trong phương thức updateTimestamp
-   * this.updatedAt = toMillisFromDateTime(now());
-   * ```
+   * Định dạng createdAt thành chuỗi theo định dạng mong muốn.
    */
-  updateTimestamp(): void {
-    this.updatedAt = convertToMillis(new Date());
-  }
-
-  /**
-   * Chuyển đổi createdAt thành một kiểu dữ liệu thời gian tùy ý (ví dụ: Date hoặc Luxon DateTime)
-   * bằng cách sử dụng hàm chuyển đổi được cung cấp từ @repo/common hoặc tùy chỉnh.
-   * @param converter Hàm chuyển đổi từ milliseconds (number) sang kiểu T.
-   *                  Ví dụ: `convertFromMillis` từ `@repo/common` để lấy JS Date,
-   *                  hoặc `fromMillisToDateTime` từ `@repo/common` để lấy Luxon DateTime.
-   * @param zone Múi giờ tùy chọn cho việc chuyển đổi.
-   * @returns Đối tượng kiểu T.
-   * @example
-   * ```typescript
-   * import { convertFromMillis, fromMillisToDateTime } from "@repo/common";
-   *
-   * const jsDate = entity.getCreatedAtConverted(convertFromMillis, "Asia/Ho_Chi_Minh");
-   * const luxonDateTime = entity.getCreatedAtConverted(fromMillisToDateTime, "Europe/London");
-   * ```
-   */
-  getCreatedAtConverted<T>(
-    converter: (ms: number, zone?: string) => T,
-    zone?: string
-  ): T {
-    return converter(this.createdAt, zone);
-  }
-
-  /**
-   * Chuyển đổi updatedAt thành một kiểu dữ liệu thời gian tùy ý (ví dụ: Date hoặc Luxon DateTime)
-   * bằng cách sử dụng hàm chuyển đổi được cung cấp từ @repo/common hoặc tùy chỉnh.
-   * @param converter Hàm chuyển đổi từ milliseconds (number) sang kiểu T.
-   *                  Ví dụ: `convertFromMillis` từ `@repo/common` để lấy JS Date,
-   *                  hoặc `fromMillisToDateTime` từ `@repo/common` để lấy Luxon DateTime.
-   * @param zone Múi giờ tùy chọn cho việc chuyển đổi.
-   * @returns Đối tượng kiểu T.
-   * @example
-   * ```typescript
-   * import { convertFromMillis, fromMillisToDateTime } from "@repo/common";
-   *
-   * const jsDate = entity.getUpdatedAtConverted(convertFromMillis, "Asia/Ho_Chi_Minh");
-   * const luxonDateTime = entity.getUpdatedAtConverted(fromMillisToDateTime, "Europe/London");
-   * ```
-   */
-  getUpdatedAtConverted<T>(
-    converter: (ms: number, zone?: string) => T,
-    zone?: string
-  ): T {
-    return converter(this.updatedAt, zone);
-  }
-
-  /**
-   * Định dạng createdAt thành chuỗi sử dụng @repo/common
-   * @param formatMillis Hàm định dạng milliseconds thành chuỗi
-   * @param format Định dạng (mặc định là dd/MM/yyyy HH:mm:ss)
-   * @param zone Múi giờ (mặc định là UTC)
-   * @param locale Ngôn ngữ (mặc định là en-US)
-   * @returns Chuỗi đã định dạng
-   * @example
-   * ```typescript
-   * import { formatMillis, COMMON_DATE_FORMATS, TIMEZONES } from "@repo/common/utils/date";
-   *
-   * // Trong class kế thừa từ BaseEntity
-   * const formattedDate = this.formatCreatedAt(formatMillis, COMMON_DATE_FORMATS.DATE_TIME, TIMEZONES.ASIA_HO_CHI_MINH, "vi-VN");
-   * ```
-   */
-  formatCreatedAt(
-    formatMillis: (
-      ms: number,
-      format?: string,
-      zone?: string,
-      locale?: string
-    ) => string,
-    format?: string,
+  public formatCreatedAt(
+    format = "dd/MM/yyyy HH:mm:ss",
     zone?: string,
     locale?: string
   ): string {
-    return formatMillis(this.createdAt, format, zone, locale);
+    return formatMillis(this.createdAt.getTime(), format, zone, locale);
   }
 
   /**
-   * Định dạng updatedAt thành chuỗi sử dụng @repo/common
-   * @param formatMillis Hàm định dạng milliseconds thành chuỗi
-   * @param format Định dạng (mặc định là dd/MM/yyyy HH:mm:ss)
-   * @param zone Múi giờ (mặc định là UTC)
-   * @param locale Ngôn ngữ (mặc định là en-US)
-   * @returns Chuỗi đã định dạng
-   * @example
-   * ```typescript
-   * import { formatMillis, COMMON_DATE_FORMATS, TIMEZONES } from "@repo/common/utils/date";
-   *
-   * // Trong class kế thừa từ BaseEntity
-   * const formattedDate = this.formatUpdatedAt(formatMillis, COMMON_DATE_FORMATS.DATE_TIME, TIMEZONES.ASIA_HO_CHI_MINH, "vi-VN");
-   * ```
+   * Định dạng updatedAt thành chuỗi theo định dạng mong muốn.
    */
-  formatUpdatedAt(
-    formatMillis: (
-      ms: number,
-      format?: string,
-      zone?: string,
-      locale?: string
-    ) => string,
-    format?: string,
+  public formatUpdatedAt(
+    format = "dd/MM/yyyy HH:mm:ss",
     zone?: string,
     locale?: string
   ): string {
-    return formatMillis(this.updatedAt, format, zone, locale);
+    return formatMillis(this.updatedAt.getTime(), format, zone, locale);
   }
 }

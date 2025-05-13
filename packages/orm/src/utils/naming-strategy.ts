@@ -28,7 +28,7 @@ export function toPlural(input: string): string {
   ) {
     return input + "es";
   }
-  
+
   // Trường hợp mặc định
   return input + "s";
 }
@@ -47,4 +47,14 @@ export function toPluralSnakeCase(input: string): string {
  */
 function isVowel(char: string): boolean {
   return ["a", "e", "i", "o", "u"].includes(char.toLowerCase());
+}
+
+/**
+ * Chuyển đổi một chuỗi từ snake_case sang camelCase
+ * @param input Chuỗi đầu vào (snake_case)
+ */
+export function toCamelCase(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/_([a-z0-9])/g, (_match, char) => char.toUpperCase());
 }

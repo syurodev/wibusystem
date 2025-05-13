@@ -763,4 +763,36 @@ export class QueryBuilder<Entity extends object = any> {
     );
     return result;
   }
+
+  private buildDeleteSql(): { sql: string; parameters: unknown[] } {
+    const fromSql = `"${this.fromTable}"`;
+    // buildWhereClause nhận tham số là vị trí bắt đầu của placeholder cho parameter.
+    // Vì DELETE chỉ có WHERE clause (và RETURNING không dùng parameter), nên bắt đầu từ 0.
+    const { whereSql, parameters: whereParams } = this.buildWhereClause(0);
+    const returningSql = this.buildReturningSql();
+
+    // whereSql đã chứa từ khóa "WHERE" nếu có điều kiện.
+    const sql = `DELETE FROM ${fromSql} ${whereSql} ${returningSql}`.trim();
+
+    return { sql, parameters: whereParams };
+  }
+
+  public async delete(): Promise<QueryResult<any>> {
+    if (this.whereConditions.length === 0) {
+      console.warn(
+        `QueryBuilder.delete() được gọi mà không có mệnh đề WHERE. Thao tác này sẽ XÓA TẤT CẢ các hàng trong bảng '${this.fromTable}'. Nếu đây là ý định, hãy xem xét việc thêm một comment hoặc một cơ chế xác nhận rõ ràng.`
+      );
+      // Để an toàn hơn, có thể throw lỗi ở đây nếu không có mệnh đề WHERE,
+      // hoặc yêu cầu một flag đặc biệt để cho phép xóa toàn bộ bảng.
+      // throw new Error(`DELETE operation on table '${this.fromTable}' requires a WHERE clause.`);
+    }
+
+    const { sql, parameters } = this.buildDeleteSql();
+    const result = await this.connectionManager.query(
+      sql,
+      parameters,
+      this.client
+    );
+    return result;
+  }
 }

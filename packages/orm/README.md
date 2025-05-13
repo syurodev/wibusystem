@@ -481,92 +481,73 @@ const result = await ormClient
   .insert({ username: "new_user" });
 ```
 
-### 2.9. Sử dụng Các Hàm Tổng Hợp (Aggregate Functions)
+### 2.9. Thực thi Câu lệnh DELETE
 
-QueryBuilder cung cấp các phương thức tiện lợi để sử dụng các hàm tổng hợp SQL phổ biến như `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`. Kết quả của các hàm này thường được truy cập thông qua một alias.
+QueryBuilder cũng hỗ trợ thực thi câu lệnh `DELETE` để xóa các hàng khỏi bảng, với khả năng chỉ định điều kiện `WHERE` và tùy chọn trả về các hàng đã bị xóa.
+
+**Phương thức `delete(): Promise<QueryResult<any>>`**
+
+- Thực thi câu lệnh `DELETE` đã được xây dựng.
+- **Cảnh báo quan trọng:** Nếu không có mệnh đề `WHERE` nào được chỉ định (ví dụ: `.where(...)`), phương thức `delete()` sẽ xóa TẤT CẢ các hàng trong bảng. Một cảnh báo sẽ được log ra console trong trường hợp này. Hãy sử dụng cẩn thận!
+- Bạn có thể kết hợp với phương thức `returning()` (đã được mô tả ở mục `INSERT`) để lấy lại dữ liệu của các hàng đã bị xóa.
+
+**Ví dụ sử dụng:**
 
 ```typescript
-// Giả sử ormClient và class User, Order đã được định nghĩa
+// Giả sử ormClient và các class Entity (User, Task) đã được định nghĩa
 
-async function performAggregateQueries() {
+async function deleteOperations() {
   try {
-    // Đếm tổng số user
-    const totalUsersResult = await ormClient
+    // 1. Xóa một user cụ thể theo ID
+    const deleteOneResult = await ormClient
       .createQueryBuilder(User)
-      .count("*", "total_users") // COUNT(*) AS total_users
-      .getOne<{ total_users: string | number }>(); // Kiểu trả về có thể là string hoặc number tùy DB driver
-    console.log("Total users:", totalUsersResult?.total_users);
+      .where("id = $1", [101]) // Giả sử user có id 101 cần xóa
+      .delete();
+    console.log(
+      `Số hàng bị ảnh hưởng bởi việc xóa user 101: ${deleteOneResult.rowCount}`
+    );
 
-    // Đếm số user đang hoạt động
-    const activeUsersCountResult = await ormClient
+    // 2. Xóa nhiều users không hoạt động và trả về thông tin của họ
+    const inactiveUsersToDelete = await ormClient
       .createQueryBuilder(User)
-      .where("status = $1", ["active"])
-      .count("id", "active_count") // COUNT(id) AS active_count (hoặc tên cột tương ứng)
-      .getOne<{ active_count: string | number }>();
-    console.log("Active users:", activeUsersCountResult?.active_count);
+      .where("status = $1", ["inactive"])
+      .returning(["id", "username", "email"]) // Chỉ định các cột muốn trả về
+      .delete();
 
-    // Tính tổng giá trị các đơn hàng
-    // Giả sử Order có thuộc tính 'amount'
-    const totalOrderAmountResult = await ormClient
-      .createQueryBuilder("orders") // Hoặc dùng class Order nếu có
-      .sum("amount", "total_revenue")
-      .getOne<{ total_revenue: string | number | null }>();
-    console.log("Total revenue:", totalOrderAmountResult?.total_revenue);
+    if (inactiveUsersToDelete.rowCount > 0) {
+      console.log(
+        `Đã xóa ${inactiveUsersToDelete.rowCount} user không hoạt động:`
+      );
+      inactiveUsersToDelete.rows.forEach((user) => {
+        console.log(
+          ` - ID: ${user.id}, Username: ${user.username}, Email: ${user.email}`
+        );
+      });
+    } else {
+      console.log("Không tìm thấy user không hoạt động nào để xóa.");
+    }
 
-    // Tính giá trị trung bình của một đơn hàng
-    const averageOrderPriceResult = await ormClient
-      .createQueryBuilder("orders")
-      .avg("amount", "average_price")
-      .getOne<{ average_price: string | number | null }>();
-    console.log("Average order price:", averageOrderPriceResult?.average_price);
-
-    // Tìm giá trị đơn hàng nhỏ nhất và lớn nhất
-    const minMaxPriceResult = await ormClient
-      .createQueryBuilder("orders")
-      .min("amount", "min_price")
-      .max("amount", "max_price")
-      .getOne<{
-        min_price: string | number | null;
-        max_price: string | number | null;
-      }>();
-    console.log("Min order price:", minMaxPriceResult?.min_price);
-    console.log("Max order price:", minMaxPriceResult?.max_price);
-
-    // Kết hợp nhiều hàm tổng hợp
-    const userStatsResult = await ormClient
-      .createQueryBuilder(User)
-      .count("*", "total")
-      .avg("age", "average_age")
-      .where("status = $1", ["active"])
-      .getOne<{ total: number; average_age: number | null }>();
-    console.log("Active User Stats:", userStatsResult);
+    // 3. Xóa tất cả các task (VÍ DỤ NGUY HIỂM - SẼ CÓ CẢNH BÁO)
+    // Chú ý: Trong ứng dụng thực tế, bạn nên có cơ chế xác nhận cho thao tác này.
+    /*
+    const confirmDeleteAllTasks = false; // Đặt thành true để chạy ví dụ này
+    if (confirmDeleteAllTasks) {
+      console.warn("CẢNH BÁO: Sắp xóa tất cả các task!");
+      const deleteAllTasksResult = await ormClient
+        .createQueryBuilder(Task) // Giả sử Task là một Entity đã định nghĩa
+        .delete();
+      console.log(`Đã xóa ${deleteAllTasksResult.rowCount} task.`);
+    } else {
+      console.log("Việc xóa tất cả các task đã được hủy bỏ.");
+    }
+    */
   } catch (error) {
-    console.error("Error performing aggregate queries:", error);
+    console.error("Lỗi trong quá trình thực hiện DELETE:", error.message);
   }
 }
 
-// performAggregateQueries();
+// deleteOperations();
 ```
-
-**Các phương thức tổng hợp:**
-
-- `count(field: string = "*", alias?: string): this`
-  - `field`: Tên thuộc tính hoặc cột để đếm. Mặc định là `"*"` (đếm tất cả các hàng).
-  - `alias`: Tên bí danh cho kết quả (ví dụ: `'total_users'`). Nếu không cung cấp, một alias mặc định sẽ được tạo (ví dụ: `count_id`, `count_all`).
-- `sum(field: string, alias?: string): this`
-  - `field`: Tên thuộc tính hoặc cột để tính tổng (không thể là `"*"`).
-- `avg(field: string, alias?: string): this`
-  - `field`: Tên thuộc tính hoặc cột để tính trung bình (không thể là `"*"`).
-- `min(field: string, alias?: string): this`
-  - `field`: Tên thuộc tính hoặc cột để tìm giá trị nhỏ nhất (không thể là `"*"`).
-- `max(field: string, alias?: string): this`
-  - `field`: Tên thuộc tính hoặc cột để tìm giá trị lớn nhất (không thể là `"*"`).
-
-**Lưu ý khi lấy kết quả:**
-
-- Các truy vấn tổng hợp thường trả về một hàng duy nhất. Sử dụng `getOne<ResultType>()` để lấy kết quả này.
-- `ResultType` nên là một interface hoặc type mô tả cấu trúc của đối tượng kết quả, với các thuộc tính khớp với alias bạn đã đặt. Ví dụ: `interface { total_users: number }`.
-- Giá trị trả về từ database cho các hàm tổng hợp có thể là `string` hoặc `number` (hoặc `null` nếu không có dữ liệu để tổng hợp, ví dụ `SUM` trên một bảng rỗng). Hãy kiểm tra kiểu dữ liệu thực tế từ driver database của bạn và ép kiểu (cast) một cách cẩn thận nếu cần.
 
 ### 2.10. Quản lý Giao dịch (Transactions) với QueryBuilder
 
@@ -725,7 +706,6 @@ async function main() {
     // hiện tại chúng chưa được triển khai hoàn chỉnh trong BaseEntity.
     // const taskToComplete = new Task();
     // taskToComplete.id = newTask.id;
-    // taskToComplete.title = newTask.title;
     // taskToComplete.is_completed = true;
     // await taskToComplete.save(ormClient); // Giả định phương thức save tồn tại và hoạt động
   } catch (error) {

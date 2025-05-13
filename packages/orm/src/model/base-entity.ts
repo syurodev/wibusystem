@@ -1,7 +1,4 @@
 import { convertFromMillis, formatMillis } from "@repo/common";
-import { ModelManager } from "./model-manager";
-import type { Constructor } from "./types";
-import { PostgresDataType } from "./types";
 
 /**
  * BaseEntity cung cấp các trường cơ bản cho tất cả các entity
@@ -88,58 +85,58 @@ export abstract class BaseEntity {
   public toJSON(): Record<string, unknown> {
     const jsonData: Record<string, unknown> = {};
     let metadata;
-    try {
-      metadata = ModelManager.getModelMetadata(
-        this.constructor as Constructor<this>
-      );
-    } catch (error) {
-      Object.getOwnPropertyNames(this).forEach((prop) => {
-        if (typeof (this as any)[prop] !== "function") {
-          const value = (this as any)[prop];
-          if (value instanceof Date) {
-            jsonData[prop] = value.toISOString();
-          } else {
-            jsonData[prop] = value;
-          }
-        }
-      });
-      return jsonData;
-    }
+    // try {
+    //   metadata = ModelManager.getModelMetadata(
+    //     this.constructor as Constructor<this>
+    //   );
+    // } catch (error) {
+    //   Object.getOwnPropertyNames(this).forEach((prop) => {
+    //     if (typeof (this as any)[prop] !== "function") {
+    //       const value = (this as any)[prop];
+    //       if (value instanceof Date) {
+    //         jsonData[prop] = value.toISOString();
+    //       } else {
+    //         jsonData[prop] = value;
+    //       }
+    //     }
+    //   });
+    //   return jsonData;
+    // }
 
-    for (const propertyName in metadata.columns) {
-      if (
-        Object.prototype.hasOwnProperty.call(metadata.columns, propertyName)
-      ) {
-        const columnDef = metadata.columns[propertyName];
-        const propValue = (this as any)[propertyName];
+    // for (const propertyName in metadata.columns) {
+    //   if (
+    //     Object.prototype.hasOwnProperty.call(metadata.columns, propertyName)
+    //   ) {
+    //     const columnDef = metadata.columns[propertyName];
+    //     const propValue = (this as any)[propertyName];
 
-        if (propValue === undefined || propValue === null) {
-          jsonData[propertyName] = propValue;
-          continue;
-        }
+    //     if (propValue === undefined || propValue === null) {
+    //       jsonData[propertyName] = propValue;
+    //       continue;
+    //     }
 
-        if (propValue instanceof Date) {
-          jsonData[propertyName] = propValue.toISOString();
-        } else if (
-          columnDef &&
-          (columnDef.type === PostgresDataType.DATE ||
-            columnDef.type === PostgresDataType.TIMESTAMP ||
-            columnDef.type === PostgresDataType.TIMESTAMPTZ) &&
-          typeof propValue === "number"
-        ) {
-          try {
-            jsonData[propertyName] = convertFromMillis(propValue).toISOString();
-          } catch (e) {
-            ModelManager.loggerService?.warn(
-              `Failed to convert numeric timestamp to ISO string for ${propertyName}: ${String(e)}`
-            );
-            jsonData[propertyName] = propValue;
-          }
-        } else {
-          jsonData[propertyName] = propValue;
-        }
-      }
-    }
+    //     if (propValue instanceof Date) {
+    //       jsonData[propertyName] = propValue.toISOString();
+    //     } else if (
+    //       columnDef &&
+    //       (columnDef.type === PostgresDataType.DATE ||
+    //         columnDef.type === PostgresDataType.TIMESTAMP ||
+    //         columnDef.type === PostgresDataType.TIMESTAMPTZ) &&
+    //       typeof propValue === "number"
+    //     ) {
+    //       try {
+    //         jsonData[propertyName] = convertFromMillis(propValue).toISOString();
+    //       } catch (e) {
+    //         ModelManager.loggerService?.warn(
+    //           `Failed to convert numeric timestamp to ISO string for ${propertyName}: ${String(e)}`
+    //         );
+    //         jsonData[propertyName] = propValue;
+    //       }
+    //     } else {
+    //       jsonData[propertyName] = propValue;
+    //     }
+    //   }
+    // }
     return jsonData;
   }
 

@@ -158,3 +158,62 @@ export const MODEL_REGISTRY = new Map<string, ModelMetadata>();
  * Represents a constructor of a class.
  */
 export type Constructor<T = object> = new (...args: any[]) => T;
+
+// Thêm các định nghĩa mới ở đây
+
+// Tên của một model (thường là tên class)
+export type ModelName = string;
+
+// Tên của một cột trong model (thường là tên thuộc tính)
+export type ColumnName<T> = keyof T & string;
+
+// Lớp tĩnh của một model (constructor)
+export type ModelStatic<T extends object> = new (...args: any[]) => T;
+
+// Định nghĩa schema cho một model
+export interface ModelSchema<T extends object> {
+  tableName: string;
+  columns: {
+    // eslint-disable-next-line no-unused-vars
+    [P in ColumnName<T>]: ColumnDefinition;
+  };
+  relations?: Record<string, RelationDefinition<any, any>>;
+  description?: string;
+  schema?: string; // Thường là 'public'
+  indexes?: IndexDefinition[];
+}
+
+// Định nghĩa đầy đủ của một model, kết hợp schema và class
+export interface ModelDefinition<T extends object> {
+  name: ModelName;
+  tableName: string;
+  columns: {
+    // eslint-disable-next-line no-unused-vars
+    [P in ColumnName<T>]: ColumnDefinition;
+  };
+  relations: Record<string, RelationDefinition<any, any>>;
+  modelClass: ModelStatic<T>;
+}
+
+// Định nghĩa một mối quan hệ
+export interface RelationDefinition<
+  TOrigin extends object,
+  TTarget extends object,
+> {
+  type: "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
+  target: ModelStatic<TTarget> | (() => ModelStatic<TTarget>); // Target model class (có thể là lazy loaded)
+  targetModelName?: ModelName; // Tên của target model, sẽ được resolve sau
+  joinColumn?: string | { name: string; referencedColumnName: string }; // For one-to-one, many-to-one
+  inverseSide?: keyof TTarget & string; // Tên thuộc tính ở phía đối diện của mối quan hệ
+  // For one-to-many, inverseSide is the property on TTarget that maps back to TOrigin
+  // For many-to-many
+  joinTable?: {
+    name: string;
+    joinColumns?: { name: string; referencedColumnName: string }[];
+    inverseJoinColumns?: { name: string; referencedColumnName: string }[];
+  };
+  cascade?: boolean | ("insert" | "update" | "remove")[];
+  eager?: boolean; // Tải mối quan hệ này ngay khi query model gốc
+  nullable?: boolean;
+  description?: string;
+}

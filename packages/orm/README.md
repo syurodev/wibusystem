@@ -568,6 +568,90 @@ async function performAggregateQueries() {
 - `ResultType` nên là một interface hoặc type mô tả cấu trúc của đối tượng kết quả, với các thuộc tính khớp với alias bạn đã đặt. Ví dụ: `interface { total_users: number }`.
 - Giá trị trả về từ database cho các hàm tổng hợp có thể là `string` hoặc `number` (hoặc `null` nếu không có dữ liệu để tổng hợp, ví dụ `SUM` trên một bảng rỗng). Hãy kiểm tra kiểu dữ liệu thực tế từ driver database của bạn và ép kiểu (cast) một cách cẩn thận nếu cần.
 
+### 2.10. Quản lý Giao dịch (Transactions) với QueryBuilder
+
+ORM cung cấp một API tiện lợi để quản lý các giao dịch cơ sở dữ liệu, đảm bảo tính toàn vẹn dữ liệu khi thực hiện nhiều thao tác. Bạn có thể sử dụng cả SQL thuần và `QueryBuilder` bên trong một giaoịch.
+
+**Cách sử dụng:**
+
+Phương thức `ormClient.transaction()` nhận một hàm callback. Bên trong hàm callback này, bạn nhận được một đối tượng `transaction` mà bạn có thể sử dụng để thực thi các truy vấn.
+
+- `transaction.query(sql: string, params?: any[]): Promise<QueryResult>`: Thực thi một câu lệnh SQL thuần trong ngữ cảnh của giao dịch.
+- `transaction.createQueryBuilder<Entity>(target: Constructor<Entity> | string): QueryBuilder<Entity>`: Tạo một instance `QueryBuilder` được gắn với giao dịch hiện tại. Tất cả các thao tác được thực hiện bởi `QueryBuilder` này sẽ là một phần của giao dịch đó.
+
+Nếu hàm callback hoàn tất mà không có lỗi, giao dịch sẽ tự động được `COMMIT`. Nếu có bất kỳ lỗi nào xảy ra bên trong callback, giao dịch sẽ tự động được `ROLLBACK`.
+
+**Ví dụ:**
+
+```typescript
+// Giả sử ormClient, User class, và Post class đã được định nghĩa
+
+async function performOperationsInTransaction() {
+  try {
+    await ormClient.transaction(async (tx) => {
+      // Sử dụng transaction.query() cho SQL thuần
+      const directInsertResult = await tx.query(
+        "INSERT INTO logs (message, level) VALUES ($1, $2) RETURNING id",
+        ["User creation process started", "info"]
+      );
+      const logId = directInsertResult.rows[0].id;
+      console.log(`Log entry created with id: ${logId}`);
+
+      // Sử dụng transaction.createQueryBuilder()
+      const userQb = tx.createQueryBuilder(User);
+      const insertUserResult = await userQb
+        .insert({
+          username: "transaction_user",
+          email: "tx_user@example.com",
+          status: "pending",
+          age: 28,
+        })
+        .returning(["id", "username"]); // Yêu cầu trả về các cột này
+
+      // QueryBuilder.insert() trả về QueryResult<any>.
+      // Để lấy dữ liệu của user mới, bạn cần truy cập vào thuộc tính 'rows'.
+      if (!insertUserResult.rows || insertUserResult.rows.length === 0) {
+        throw new Error(
+          "Không thể tạo user mới trong transaction: không có dữ liệu trả về."
+        );
+      }
+      const newUser = insertUserResult.rows[0] as {
+        id: number;
+        username: string;
+      }; // Ép kiểu cho rõ ràng
+      console.log("New user created in transaction:", newUser);
+
+      if (!newUser || !newUser.id) {
+        // Kiểm tra này có thể không cần thiết nữa nếu kiểm tra ở trên đã đủ
+        throw new Error(
+          "Không thể tạo user mới trong transaction sau khi kiểm tra rows."
+        );
+      }
+
+      const postQb = tx.createQueryBuilder(Post);
+      await postQb.insert({
+        title: "My First Post in Transaction",
+        content: "This post was created within a database transaction.",
+        authorId: newUser.id, // Giả sử Post có authorId
+      });
+      // .execute(); // insert() tự thực thi
+
+      console.log(`Post created for user ID: ${newUser.id}`);
+
+      // Nếu tất cả các thao tác trên thành công, giao dịch sẽ được COMMIT.
+      // Nếu có lỗi ở bất kỳ đâu, tất cả sẽ được ROLLBACK.
+    });
+    console.log("Giao dịch hoàn tất thành công!");
+  } catch (error) {
+    console.error("Lỗi trong quá trình giao dịch:", error.message);
+    // Lỗi ở đây có thể là lỗi từ bên trong callback của transaction
+    // hoặc lỗi trong quá trình quản lý transaction của ORM.
+  }
+}
+
+// performOperationsInTransaction();
+```
+
 ## 3. Ví dụ Sử dụng Tổng quan
 
 ```typescript
@@ -684,7 +768,7 @@ main();
 
 (Thông tin cài đặt sẽ được cập nhật khi package được public hoặc theo hướng dẫn của monorepo)
 
-```
+```packages/orm/README.md
 # Ví dụ (nếu là một package riêng lẻ)
 # npm install @repo/orm
 # yarn add @repo/orm

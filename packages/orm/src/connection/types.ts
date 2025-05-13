@@ -57,14 +57,31 @@ export interface ConnectionConfig {
    * Cấu hình logging
    * @default false
    */
-  logging?: boolean | string[] | ((message: string) => void);
+  logging?: LoggingConfig;
 }
+
+/**
+ * Các mức độ log được hỗ trợ
+ */
+export type LoggingLevel = "query" | "error" | "warn" | "info" | "debug";
+
+/**
+ * Kiểu cho cấu hình logging
+ * - true: Bật tất cả các log (query, error, warn, info, debug)
+ * - false: Tắt tất cả các log
+ * - LoggingLevel[]: Mảng các mức log cụ thể muốn bật (ví dụ: ['query', 'error'])
+ * - Partial<Record<LoggingLevel, boolean>>: Object để bật/tắt từng mức log
+ */
+export type LoggingConfig =
+  | boolean
+  | LoggingLevel[]
+  | { [key in LoggingLevel]?: boolean };
 
 /**
  * Trạng thái của ConnectionManager
  */
 export enum ConnectionStatus {
-  DISCONNECTED = 'disconnected',
-  CONNECTED = 'connected',
-  ERROR = 'error'
+  DISCONNECTED = "disconnected",
+  CONNECTED = "connected",
+  ERROR = "error",
 }

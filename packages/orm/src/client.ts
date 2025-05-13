@@ -1,16 +1,26 @@
 import { QueryResult, QueryResultRow } from "pg";
 import { ConnectionManager } from "./connection/connection-manager";
+import { OrmError, TransactionError } from "./errors";
+import { Logger } from "./logger";
 import { ModelManager } from "./model/model-manager";
+import type { Constructor } from "./model/types";
 import { QueryBuilder } from "./query-builder";
+import { Transaction } from "./transaction/transaction";
 
 /**
  * Client chính của ORM, cung cấp các phương thức để tương tác với database
  */
 export class OrmClient {
+  private readonly connectionManager: ConnectionManager;
   private readonly modelManager: ModelManager;
+  private readonly logger: Logger = Logger.getInstance();
 
-  constructor(private readonly connectionManager: ConnectionManager) {
-    this.modelManager = new ModelManager(); // ModelManager sẽ được khởi tạo ở đây
+  constructor(
+    connectionManager: ConnectionManager,
+    modelManager: ModelManager
+  ) {
+    this.connectionManager = connectionManager;
+    this.modelManager = modelManager;
   }
 
   /**
@@ -30,14 +40,13 @@ export class OrmClient {
    * @param target Tên bảng (string) hoặc lớp Entity (constructor function).
    * @returns Một instance của QueryBuilder.
    */
-  public createQueryBuilder<Entity = any>(
+  public createQueryBuilder<Entity extends object = any>(
     // eslint-disable-next-line @typescript-eslint/ban-types
     target: string | Function
   ): QueryBuilder<Entity> {
     return new QueryBuilder<Entity>(
       this.connectionManager,
-      this.modelManager,
-      target
+      target as string | Constructor<Entity>
     );
   }
 
@@ -52,7 +61,10 @@ export class OrmClient {
     modelInstance: T
   ): Record<string, any> {
     const className = typeof target === "function" ? target.name : target;
-    return this.modelManager.toDatabase(className, modelInstance);
+    return this.modelManager.convertToDatabaseFormat(
+      modelInstance,
+      className as any
+    );
   }
 
   /**
@@ -66,7 +78,10 @@ export class OrmClient {
     dbData: Record<string, any>
   ): Partial<T> {
     const className = typeof target === "function" ? target.name : target;
-    return this.modelManager.fromDatabase<T>(className, dbData);
+    return this.modelManager.convertFromDatabaseFormat<T>(
+      dbData,
+      className as any
+    );
   }
 
   /**
@@ -76,7 +91,7 @@ export class OrmClient {
   // eslint-disable-next-line @typescript-eslint/ban-types
   public getTableName(target: Function | string): string | undefined {
     const className = typeof target === "function" ? target.name : target;
-    return this.modelManager.getTableName(className);
+    return this.modelManager.getTableName(className as any);
   }
 
   /**
@@ -90,6 +105,56 @@ export class OrmClient {
     propertyName: string
   ): string | undefined {
     const className = typeof target === "function" ? target.name : target;
-    return this.modelManager.getColumnName(className, propertyName);
+    return this.modelManager.getColumnName<any>(
+      className as any,
+      propertyName as any
+    );
+  }
+
+  public async transaction<T>(
+    callback: (transaction: Transaction) => Promise<T>
+  ): Promise<T> {
+    const client = await this.connectionManager.getClientForTransaction();
+    const transaction = new Transaction(client, this.connectionManager);
+
+    try {
+      await transaction.begin();
+      this.logger.info("Transaction đã bắt đầu.");
+      const result = await callback(transaction);
+      await transaction.commit();
+      this.logger.info("Transaction đã commit thành công.");
+      return result;
+    } catch (error: any) {
+      this.logger.error(
+        "Lỗi xảy ra trong transaction, đang rollback...",
+        error
+      );
+      try {
+        await transaction.rollback();
+        this.logger.info("Transaction đã rollback thành công.");
+      } catch (rollbackError: any) {
+        this.logger.error(
+          "Lỗi khi thực hiện rollback transaction sau một lỗi khác:",
+          rollbackError
+        );
+      }
+
+      if (error instanceof OrmError) {
+        throw error;
+      } else if (error instanceof Error) {
+        throw new TransactionError(
+          `Lỗi trong quá trình giao dịch: ${error.message}`,
+          error
+        );
+      } else {
+        throw new TransactionError(
+          "Lỗi không xác định trong quá trình giao dịch.",
+          error
+        );
+      }
+    } finally {
+      transaction.releaseClient();
+      this.logger.info("Client của transaction đã được giải phóng.");
+    }
   }
 }

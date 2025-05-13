@@ -1,7 +1,7 @@
-import { QueryResult } from "pg";
+import { PoolClient, QueryResult } from "pg";
 import { ConnectionManager } from "../connection/connection-manager";
 import { ModelManager } from "../model/model-manager";
-import type { Constructor } from "../model/types"; // Import Constructor type
+import type { Constructor, ModelName } from "../model/types"; // Import Constructor type
 import { toSnakeCase } from "../utils/naming-strategy"; // Import toSnakeCase
 import {
   type InsertInput,
@@ -16,41 +16,45 @@ import {
 /**
  * Lớp chính để xây dựng và thực thi các câu lệnh SQL.
  */
-export class QueryBuilder<Entity = any> {
+export class QueryBuilder<Entity extends object = any> {
   private readonly connectionManager: ConnectionManager;
-  private readonly entityConstructor?: Constructor<Entity>; // Thêm readonly
-  private readonly alias: string; // Thêm readonly
-  private readonly fromTable: string; // Thêm readonly
+  private readonly modelManager: ModelManager;
+  private readonly entityConstructor?: Constructor<Entity>;
+  private readonly alias: string;
+  private readonly fromTable: string;
+  private readonly client?: PoolClient;
 
-  private readonly selectClauses: InternalSelectClause[] = []; // Thêm readonly
-  private readonly whereConditions: WhereClauseCondition[] = []; // Thêm readonly
-  private readonly orderByClauses: OrderByClause[] = []; // Thêm readonly
+  private readonly selectClauses: InternalSelectClause[] = [];
+  private readonly whereConditions: WhereClauseCondition[] = [];
+  private readonly orderByClauses: OrderByClause[] = [];
   private limitCount?: number;
   private offsetCount?: number;
   private returningClause?: ReturningOption;
 
   constructor(
     connectionManager: ConnectionManager,
-    target: Constructor<Entity> | string // Chấp nhận Constructor hoặc string
+    target: Constructor<Entity> | string,
+    client?: PoolClient
   ) {
     this.connectionManager = connectionManager;
+    this.modelManager = ModelManager.getInstance();
+    this.client = client;
 
     let explicitTableName: string | undefined;
 
     if (typeof target === "function") {
-      this.entityConstructor = target as Constructor<Entity>; // Gán constructor trực tiếp
-      const metadata = ModelManager.getModelMetadata(this.entityConstructor); // Gọi static method
-      this.fromTable =
-        metadata.tableName ?? ModelManager.getTableName(this.entityConstructor); // Sử dụng static getTableName
-      this.alias = this.entityConstructor.name.charAt(0).toLowerCase();
+      this.entityConstructor = target as Constructor<Entity>;
+      const modelName = this.entityConstructor.name as ModelName;
+      const definition =
+        this.modelManager.getModelDefinition<Entity>(modelName);
+      if (!definition) {
+        throw new Error(
+          `Không tìm thấy model definition cho \${modelName} khi khởi tạo QueryBuilder.`
+        );
+      }
+      this.fromTable = definition.tableName;
+      this.alias = modelName.charAt(0).toLowerCase();
     } else {
-      // target is a string
-      // Nếu target là string, giả định nó là tên bảng tường minh
-      // Hoặc có thể là tên class (string) mà ta cần lấy Constructor (khó hơn nếu không có registry Map<string, Constructor>)
-      // Hiện tại, logic cũ của bạn khi target là string:
-      //   1. Thử getModelMetadata(target as string) -> lỗi vì getModelMetadata cần Constructor
-      //   2. Nếu không được thì coi target là explicitTableName
-      // Đơn giản hóa: Nếu là string, coi là explicitTableName trước
       explicitTableName = target;
       this.fromTable = explicitTableName;
       this.alias = explicitTableName
@@ -58,11 +62,6 @@ export class QueryBuilder<Entity = any> {
         .map((part) => part.charAt(0))
         .join("")
         .toLowerCase();
-      // Không có entityConstructor trong trường hợp này, các hàm dựa vào metadata model sẽ không hoạt động đầy đủ
-      // hoặc cần một cách khác để lấy thông tin cột (ví dụ: dựa vào tên trực tiếp)
-      ModelManager.loggerService?.warn(
-        `QueryBuilder initialized with table name '${target}'. Metadata-dependent features might be limited.`
-      );
     }
 
     if (!this.fromTable) {
@@ -77,28 +76,26 @@ export class QueryBuilder<Entity = any> {
       return "*";
     }
     if (this.entityConstructor) {
-      // ModelManager.getColumnName(propertyName: string, modelClass?: Constructor<unknown>)
-      const metaColumnName = ModelManager.getColumnName(
-        field,
-        this.entityConstructor
+      const modelName = this.entityConstructor.name as ModelName;
+      const metaColumnName = this.modelManager.getColumnName<Entity>(
+        modelName,
+        field as keyof Entity & string
       );
-      // getColumnName trả về tên cột đã snake_case hoặc tên trong metadata.
-      // Nó không tự thêm alias của bảng.
       return `${this.alias}.${metaColumnName}`;
     }
-    // Nếu không có entityConstructor, sử dụng field trực tiếp (có thể đã snake_case nếu là property)
-    return `${this.alias}.${toSnakeCase(field)}`; // Fallback to snake_case if no constructor
+    return `${this.alias}.${toSnakeCase(field)}`;
   }
 
   private getMutationColumnName(field: string): string {
     if (this.entityConstructor) {
-      const metaColumnName = ModelManager.getColumnName(
-        field,
-        this.entityConstructor
+      const modelName = this.entityConstructor.name as ModelName;
+      const metaColumnName = this.modelManager.getColumnName<Entity>(
+        modelName,
+        field as keyof Entity & string
       );
-      return metaColumnName; // getColumnName đã trả về tên cột đúng
+      return metaColumnName;
     }
-    return toSnakeCase(field); // Fallback nếu không có entityConstructor
+    return toSnakeCase(field);
   }
 
   select(...items: SelectInputItem[]): this {
@@ -429,7 +426,7 @@ export class QueryBuilder<Entity = any> {
       let columnNameForCondition: string;
 
       switch (condition.type) {
-        case "simple":
+        case "simple": {
           let simpleConditionSql = condition.condition;
           condition.parameters.forEach((_, i) => {
             simpleConditionSql = simpleConditionSql.replace(
@@ -440,7 +437,8 @@ export class QueryBuilder<Entity = any> {
           conditionSql = `(${simpleConditionSql})`;
           conditionParams = condition.parameters;
           break;
-        case "in":
+        }
+        case "in": {
           columnNameForCondition = this.getSelectColumnName(condition.field);
           if (condition.values.length > 0) {
             const placeholders = condition.values
@@ -452,6 +450,7 @@ export class QueryBuilder<Entity = any> {
             conditionSql = "1 = 0";
           }
           break;
+        }
         case "null":
           columnNameForCondition = this.getSelectColumnName(condition.field);
           conditionSql = `${columnNameForCondition} IS NULL`;
@@ -475,11 +474,13 @@ export class QueryBuilder<Entity = any> {
           conditionSql = `${columnNameForCondition} ILIKE $${currentParameterIndex + 1}`;
           conditionParams = [condition.pattern];
           break;
-        default:
+        default: {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const _exhaustiveCheck: never = condition;
           throw new Error(
             `Loại điều kiện WHERE không được hỗ trợ: ${(_exhaustiveCheck as any).type}`
           );
+        }
       }
 
       if (index === 0) {
@@ -577,17 +578,22 @@ export class QueryBuilder<Entity = any> {
 
   async getMany<ResultType = Partial<Entity>>(): Promise<ResultType[]> {
     const { sql, parameters } = this.buildSelectSql();
-    const result = await this.connectionManager.query(sql, parameters);
+    const result = await this.connectionManager.query(
+      sql,
+      parameters,
+      this.client
+    );
     if (
-      this.entityConstructor && // Check entityConstructor
+      this.entityConstructor &&
       result.rows &&
       !this.selectClauses.some((c) => c.rawExpression)
     ) {
-      return result.rows.map(
-        (row) => ModelManager.fromDatabase(row, this.entityConstructor) // Gọi static method
-      ) as ResultType[];
+      const modelName = this.entityConstructor.name as ModelName;
+      return result.rows.map((row) =>
+        this.modelManager.convertFromDatabaseFormat<Entity>(row, modelName)
+      ) as unknown as ResultType[];
     }
-    return (result.rows || []) as ResultType[];
+    return (result.rows || []) as unknown as ResultType[];
   }
 
   async getOne<ResultType = Partial<Entity>>(): Promise<
@@ -602,15 +608,22 @@ export class QueryBuilder<Entity = any> {
         ))
     ) {
       if (this.limitCount !== undefined && this.limitCount !== 1) {
-        ModelManager.loggerService?.warn(
-          `QueryBuilder.getOne: Limit hiện tại là ${this.limitCount}. Sẽ ghi đè thành LIMIT 1 vì không phải là query aggregate.`
-        );
+        // Loại bỏ loggerService không còn tồn tại
+        // ModelManager.loggerService?.warn(
+        //   `QueryBuilder.getOne: Limit hiện tại là ${this.limitCount}. Sẽ ghi đè thành LIMIT 1 vì không phải là query aggregate.`
+        // );
+        // Nếu cần log, QueryBuilder có thể có logger riêng hoặc dựa vào ModelManager tự log.
+        // Hiện tại, chúng ta chỉ thay đổi limit.
       }
       this.limit(1);
     }
 
     const { sql, parameters } = this.buildSelectSql();
-    const result = await this.connectionManager.query(sql, parameters);
+    const result = await this.connectionManager.query(
+      sql,
+      parameters,
+      this.client
+    );
 
     if (originalLimit !== this.limitCount) {
       this.limitCount = originalLimit;
@@ -623,15 +636,16 @@ export class QueryBuilder<Entity = any> {
     const singleRow = result.rows[0];
 
     if (
-      this.entityConstructor && // Check entityConstructor
+      this.entityConstructor &&
       !this.selectClauses.some((c) => c.rawExpression)
     ) {
-      return ModelManager.fromDatabase(
+      const modelName = this.entityConstructor.name as ModelName;
+      return this.modelManager.convertFromDatabaseFormat<Entity>(
         singleRow,
-        this.entityConstructor // Gọi static method
-      ) as ResultType;
+        modelName
+      ) as unknown as ResultType;
     }
-    return singleRow as ResultType;
+    return singleRow as unknown as ResultType;
   }
 
   getSqlAndParameters(): { sql: string; parameters: unknown[] } {
@@ -669,7 +683,7 @@ export class QueryBuilder<Entity = any> {
     itemsToInsert.forEach((item) => {
       const paramsForItem: unknown[] = [];
       const itemPlaceholders = Object.keys(firstItem).map((propName) => {
-        if (!Object.prototype.hasOwnProperty.call(item, propName)) {
+        if (!Object.hasOwn(item, propName)) {
           throw new Error(
             `Missing property '${propName}' in one of the items for batch insert.`
           );
@@ -691,7 +705,11 @@ export class QueryBuilder<Entity = any> {
 
   public async insert(data: InsertInput): Promise<QueryResult<any>> {
     const { sql, parameters } = this.buildInsertSql(data);
-    const result = await this.connectionManager.query(sql, parameters);
+    const result = await this.connectionManager.query(
+      sql,
+      parameters,
+      this.client
+    );
     return result;
   }
 
@@ -704,7 +722,7 @@ export class QueryBuilder<Entity = any> {
     let currentParamIndex = 1;
 
     for (const propName in data) {
-      if (Object.prototype.hasOwnProperty.call(data, propName)) {
+      if (Object.hasOwn(data, propName)) {
         const columnName = this.getMutationColumnName(propName);
         setClauses.push(`"${columnName}" = $${currentParamIndex++}`);
         parameters.push(data[propName]);
@@ -738,7 +756,11 @@ export class QueryBuilder<Entity = any> {
       );
     }
     const { sql, parameters } = this.buildUpdateSql(data);
-    const result = await this.connectionManager.query(sql, parameters);
+    const result = await this.connectionManager.query(
+      sql,
+      parameters,
+      this.client
+    );
     return result;
   }
 }

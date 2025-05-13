@@ -1,344 +1,381 @@
-import {
-  convertFromMillis as commonConvertFromMillis,
-  convertToMillis,
-} from "@repo/common"; // Simpler import
-import { ModelNotRegisteredError } from "../errors";
-import { LoggerService } from "../logger/logger.interface";
-import { toCamelCase, toSnakeCase } from "../utils/naming-strategy"; // Đã có toCamelCase
-import type { ColumnDefinition, Constructor, ModelMetadata } from "./types";
-import { MODEL_REGISTRY, PostgresDataType } from "./types";
+import { convertFromMillis, convertToMillis } from "@repo/common";
+import { OrmError, OrmErrorCode } from "../errors";
+import { Logger } from "../logger";
+import type {
+  ColumnDefinition,
+  ColumnName,
+  ModelDefinition,
+  ModelName,
+  ModelSchema,
+  ModelStatic,
+} from "./types";
+import { PostgresDataType } from "./types";
 
 /**
  * Class quản lý các model trong ORM
  */
 export class ModelManager {
-  public static loggerService?: LoggerService;
+  private static instance: ModelManager;
+  private readonly models: Map<ModelName, ModelStatic<any>> = new Map();
+  private readonly schemas: Map<ModelName, ModelSchema<any>> = new Map();
+  private readonly logger: Logger = Logger.getInstance();
 
-  public static setLogger(logger: LoggerService): void {
-    ModelManager.loggerService = logger;
+  private constructor() {}
+
+  public static getInstance(): ModelManager {
+    if (!ModelManager.instance) {
+      ModelManager.instance = new ModelManager();
+    }
+    return ModelManager.instance;
   }
 
-  /**
-   * Lấy metadata của một model theo tên class
-   * @param className Tên class của model
-   */
-  public static getModelMetadata<T>(modelClass: Constructor<T>): ModelMetadata {
-    const metadata = MODEL_REGISTRY.get(modelClass.name); // Use modelClass.name as key
-    if (!metadata) {
-      throw new ModelNotRegisteredError(modelClass.name);
+  public registerModel<T extends object>(
+    modelClass: ModelStatic<T>,
+    schema: ModelSchema<T>
+  ): void {
+    const modelName = modelClass.name as ModelName;
+    if (this.models.has(modelName)) {
+      this.logger.warn(`Model ${modelName} đã được đăng ký. Ghi đè...`);
     }
-    return metadata;
+    this.models.set(modelName, modelClass);
+    this.schemas.set(modelName, schema);
+    this.logger.log(`Model ${modelName} đã được đăng ký với schema.`);
   }
 
-  /**
-   * Lấy tên bảng của một model
-   * @param className Tên class của model
-   */
-  public static getTableName(modelClass: Constructor<unknown>): string {
-    const metadata = ModelManager.getModelMetadata(modelClass);
-    return metadata.tableName ?? toSnakeCase(modelClass.name) + "s"; // Add fallback for tableName
+  public getModel<T extends object>(
+    modelName: ModelName
+  ): ModelStatic<T> | undefined {
+    return this.models.get(modelName) as ModelStatic<T> | undefined;
   }
 
-  /**
-   * Lấy tên cột trong database từ tên thuộc tính trong model
-   * @param className Tên class của model
-   * @param propertyName Tên thuộc tính trong model
-   */
-  public static getColumnName(
-    propertyName: string,
-    modelClass?: Constructor<unknown>
-  ): string {
-    if (modelClass) {
-      try {
-        const modelMeta = ModelManager.getModelMetadata(modelClass);
-        const columnDef = modelMeta.columns[propertyName]; // Direct access using propertyName
-
-        if (columnDef?.columnName) {
-          return columnDef.columnName;
-        }
-        // If columnDef exists (i.e., propertyName is a decorated field)
-        // but columnName is not explicitly set, decorator convention applies (snake_case of propertyName).
-        // The decorators should ensure columnDef.name is set if @Column is used.
-        // Here, we prefer explicit columnName from metadata if present, else convention.
-        if (columnDef) {
-          // The decorator should have already set a default snake_case name if not provided.
-          // This path means property is in metadata. Use its name or fall back.
-          // However, ColumnDefinition interface does not have 'name', it has 'columnName'.
-          // The decorator sets 'columnName' to snake_case(propertyName) if not specified.
-          // So, if columnDef exists, columnDef.columnName should be the one to use if not undefined.
-          // If columnDef.columnName is somehow undefined here but columnDef exists,
-          // it means decorator didn't set it, which is unlikely for @Column.
-          // For safety, or if a property could be in `columns` without a `columnName` (not typical for this setup):
-          return columnDef.columnName ?? toSnakeCase(propertyName);
-        }
-      } catch (error) {
-        if (!(error instanceof ModelNotRegisteredError)) {
-          ModelManager.loggerService?.warn(
-            `Error retrieving column metadata for ${modelClass.name}.${propertyName}: ${error instanceof Error ? error.message : String(error)}`
-          );
-        }
-        // Fall through to snake_case if model not registered or other metadata error for that property
-      }
-    }
-    return toSnakeCase(propertyName); // Fallback for no modelClass or if propertyName not in metadata
+  public getSchema<T extends object>(
+    modelName: ModelName
+  ): ModelSchema<T> | undefined {
+    return this.schemas.get(modelName);
   }
 
-  /**
-   * Chuyển đổi một đối tượng model thành dữ liệu để lưu vào database
-   * @param className Tên class của model
-   * @param modelInstance Instance của model
-   */
-  public static toDatabase(
-    data: Record<string, unknown>,
-    modelClass?: Constructor<unknown>
-  ): Record<string, unknown> {
-    if (!modelClass) {
-      const dbData: Record<string, unknown> = {};
-      for (const key of Object.keys(data)) {
-        dbData[toSnakeCase(key)] = data[key];
-      }
-      return dbData;
-    }
-
-    const modelMeta = ModelManager.getModelMetadata(modelClass);
-    const dbData: Record<string, unknown> = {};
-
-    for (const propertyName in modelMeta.columns) {
-      if (
-        Object.prototype.hasOwnProperty.call(modelMeta.columns, propertyName)
-      ) {
-        if (Object.prototype.hasOwnProperty.call(data, propertyName)) {
-          const columnDef = modelMeta.columns[propertyName];
-          if (columnDef) {
-            const valueToConvert = data[propertyName];
-            const dbColumnKey =
-              columnDef.columnName ?? toSnakeCase(propertyName);
-            dbData[dbColumnKey] = ModelManager.convertValueToDatabase(
-              valueToConvert,
-              columnDef,
-              propertyName
-            );
-          } else {
-            ModelManager.loggerService?.warn(
-              `Skipping property ${propertyName} in toDatabase: ColumnDefinition not found unexpectedly.`
-            );
-          }
-        }
-      }
-    }
-    return dbData;
-  }
-
-  /**
-   * Chuyển đổi dữ liệu từ database thành một đối tượng model
-   * @param className Tên class của model
-   * @param dbData Dữ liệu từ database
-   */
-  public static fromDatabase(
-    data: Record<string, unknown>,
-    modelClass?: Constructor<unknown>
-  ): Record<string, unknown> {
-    if (!modelClass) {
-      const result: Record<string, unknown> = {};
-      for (const key of Object.keys(data)) {
-        result[toCamelCase(key)] = data[key];
-      }
-      return result;
-    }
-
-    const modelMeta = ModelManager.getModelMetadata(modelClass);
-    const result: Record<string, unknown> = {};
-
-    for (const propertyName in modelMeta.columns) {
-      if (
-        Object.prototype.hasOwnProperty.call(modelMeta.columns, propertyName)
-      ) {
-        const columnDef = modelMeta.columns[propertyName];
-        if (columnDef) {
-          const dbColumnKey = columnDef.columnName ?? toSnakeCase(propertyName);
-          if (Object.prototype.hasOwnProperty.call(data, dbColumnKey)) {
-            result[propertyName] = ModelManager.convertValueFromDatabase(
-              data[dbColumnKey],
-              columnDef,
-              propertyName
-            );
-          }
-        } else {
-          ModelManager.loggerService?.warn(
-            `Skipping property ${propertyName} in fromDatabase: ColumnDefinition not found unexpectedly.`
-          );
-        }
-      }
-    }
-    return result;
-  }
-
-  /**
-   * Helper function to convert various date/time representations to a Unix timestamp (milliseconds).
-   * @param value The value to convert (Date instance, number, or string).
-   * @param dbType The target database type (for logging purposes).
-   */
-  private static convertToTimestamp(
+  private convertToTimestamp(
     value: unknown,
-    columnType: PostgresDataType
-  ): number | unknown {
-    if (value instanceof Date) {
-      ModelManager.loggerService?.debug(
-        `Converting Date to timestamp for type ${columnType}: ${value.toISOString()}`
-      );
-      return convertToMillis(value);
-    }
-    // If it's already a number, assume it's a pre-converted timestamp.
-    // This ORM's convention is to store dates as numeric timestamps.
-    if (typeof value === "number") {
-      ModelManager.loggerService?.debug(
-        `Value is already a number (timestamp) for type ${columnType}: ${value}`
-      );
+    columnName: ColumnName<any>,
+    modelName: ModelName
+  ): number | null | undefined {
+    if (value === null || value === undefined) {
       return value;
     }
-    ModelManager.loggerService?.warn(
-      `Value for date/timestamp column type ${columnType} is not a Date or number, returning as is: ${String(value)}`
+    if (value instanceof Date) {
+      return convertToMillis(value);
+    }
+    if (typeof value === "number") {
+      return value; // Giả sử đã là timestamp
+    }
+    this.logger.warn(
+      `Không thể chuyển đổi giá trị '${String(value)}' của cột '${String(
+        columnName
+      )}' trong model '${modelName}' sang timestamp.`
     );
-    return value; // Return as is if not a Date or number
+    throw new OrmError(
+      `Giá trị không hợp lệ cho cột timestamp: ${String(columnName)}`,
+      OrmErrorCode.TYPE_CONVERSION_ERROR
+    );
   }
 
-  /**
-   * Helper function to convert a database value (number or string) to a Date object.
-   * @param value The database value to convert.
-   * @param dbType The source database type (for logging purposes).
-   */
-  private static convertToDateObject(
+  private convertToDateObject(
     value: unknown,
-    columnType: PostgresDataType
-  ): Date | unknown {
+    columnName: ColumnName<any>,
+    modelName: ModelName
+  ): Date | null | undefined {
+    if (value === null || value === undefined) {
+      return value;
+    }
     if (typeof value === "number") {
-      ModelManager.loggerService?.debug(
-        `Converting numeric timestamp to Date for type ${columnType}: ${value}`
-      );
-      return commonConvertFromMillis(value);
+      return convertFromMillis(value);
     }
     if (value instanceof Date) {
-      ModelManager.loggerService?.debug(
-        `Value is already a Date object for type ${columnType}: ${value.toISOString()}`
-      );
-      return value; // Already a Date object
+      return value; // Đã là đối tượng Date
     }
-    // PostgreSQL date/timestamp types might return strings from the driver if not automatically parsed.
-    // Attempt to parse if it's a string that looks like a date or timestamp.
-    if (typeof value === "string") {
-      const parsedDate = new Date(value);
-      if (!isNaN(parsedDate.getTime())) {
-        ModelManager.loggerService?.debug(
-          `Parsed string to Date for type ${columnType}: ${value} -> ${parsedDate.toISOString()}`
-        );
-        return parsedDate;
+    this.logger.warn(
+      `Không thể chuyển đổi giá trị '${String(value)}' của cột '${String(
+        columnName
+      )}' trong model '${modelName}' sang Date.`
+    );
+    throw new OrmError(
+      `Giá trị không hợp lệ cho cột Date: ${String(columnName)}`,
+      OrmErrorCode.TYPE_CONVERSION_ERROR
+    );
+  }
+
+  public convertToDatabaseFormat<T extends object>(
+    entity: Partial<T>,
+    modelName: ModelName
+  ): Record<string, any> {
+    const schema = this.getSchema<T>(modelName);
+    if (!schema) {
+      this.logger.error(`Không tìm thấy schema cho model ${modelName}`);
+      throw new OrmError(
+        `Schema không tồn tại cho model: ${modelName}`,
+        OrmErrorCode.MODEL_NOT_REGISTERED
+      );
+    }
+
+    const dbObject: Record<string, any> = {};
+    for (const key in entity) {
+      if (Object.prototype.hasOwnProperty.call(entity, key)) {
+        const columnName = key as ColumnName<T>;
+        const columnDef = schema.columns[columnName];
+        const value = entity[columnName];
+
+        if (!columnDef) {
+          this.logger.warn(
+            `[convertToDatabaseFormat] Không tìm thấy định nghĩa cột cho '${String(
+              columnName
+            )}' trong model '${modelName}'. Bỏ qua cột này.`
+          );
+          continue;
+        }
+
+        try {
+          if (
+            (columnDef.type === PostgresDataType.TIMESTAMP ||
+              columnDef.type === PostgresDataType.TIMESTAMPTZ) &&
+            value !== undefined &&
+            value !== null
+          ) {
+            dbObject[columnDef.columnName ?? (columnName as string)] =
+              this.convertToTimestamp(value, columnName, modelName);
+          } else if (
+            columnDef.type === PostgresDataType.DATE &&
+            value !== undefined &&
+            value !== null
+          ) {
+            if (value instanceof Date) {
+              dbObject[columnDef.columnName ?? (columnName as string)] = value;
+            } else if (typeof value === "number") {
+              this.logger.warn(
+                `Cột '${String(
+                  columnName
+                )}' (${modelName}) có kiểu DATE nhưng nhận giá trị số (timestamp). Điều này có thể không được hỗ trợ bởi driver.`
+              );
+              dbObject[columnDef.columnName ?? (columnName as string)] =
+                this.convertToDateObject(value, columnName, modelName);
+            } else {
+              dbObject[columnDef.columnName ?? (columnName as string)] = value;
+            }
+          } else {
+            dbObject[columnDef.columnName ?? (columnName as string)] = value;
+          }
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `Lỗi khi chuyển đổi giá trị cho cột '${String(
+              columnName
+            )}' của model '${modelName}' sang định dạng database: ${errorMessage}`
+          );
+          this.logger.error(`Nguyên nhân gốc: ${String(error)}`);
+          throw new OrmError(
+            `Lỗi chuyển đổi dữ liệu cho cột ${String(
+              columnName
+            )} trong model ${modelName}`,
+            OrmErrorCode.DATA_TRANSFORMATION_ERROR
+          );
+        }
       }
     }
-    ModelManager.loggerService?.warn(
-      `Value for DB date/timestamp column type ${columnType} is not a number (timestamp) or Date object, returning as is: ${String(value)}`
-    );
-    return value; // Return as is if not a number or Date
+    return dbObject;
   }
 
-  /**
-   * Chuyển đổi giá trị từ JavaScript sang định dạng phù hợp cho PostgreSQL
-   * @param value Giá trị cần chuyển đổi
-   * @param type Kiểu dữ liệu PostgreSQL
-   */
-  private static convertValueToDatabase(
-    value: unknown,
-    columnDef: ColumnDefinition,
-    propertyName?: string // Added for logging
-  ): unknown {
-    if (value === undefined || value === null) {
-      return null; // Represent undefined or null as SQL NULL
+  public convertFromDatabaseFormat<T extends object>(
+    dbRow: Record<string, any>,
+    modelName: ModelName
+  ): T {
+    const schema = this.getSchema<T>(modelName);
+    const ModelClass = this.getModel<T>(modelName);
+
+    if (!schema || !ModelClass) {
+      this.logger.error(
+        `Không tìm thấy schema hoặc class cho model ${modelName}`
+      );
+      throw new OrmError(
+        `Schema hoặc ModelClass không tồn tại cho model: ${modelName}`,
+        OrmErrorCode.MODEL_NOT_REGISTERED
+      );
     }
 
-    switch (columnDef.type) {
-      case PostgresDataType.DATE:
-      case PostgresDataType.TIMESTAMP:
-      case PostgresDataType.TIMESTAMPTZ:
-        return ModelManager.convertToTimestamp(value, columnDef.type);
-      case PostgresDataType.JSON:
-      case PostgresDataType.JSONB:
-        if (typeof value === "object" || Array.isArray(value)) {
-          try {
-            return JSON.stringify(value);
-          } catch (error) {
-            ModelManager.loggerService?.error(
-              `Failed to stringify JSON/JSONB for property '${propertyName ?? "(unknown)"}' (column: ${columnDef.columnName ?? "auto"}): ${error instanceof Error ? error.message : String(error)}`
+    const entity = new ModelClass() as T & { [key: string]: any };
+
+    for (const modelPropertyKey in schema.columns) {
+      if (
+        Object.prototype.hasOwnProperty.call(schema.columns, modelPropertyKey)
+      ) {
+        const modelProperty = modelPropertyKey as ColumnName<T>;
+        const columnDef = schema.columns[modelProperty] as ColumnDefinition;
+        const dbColumnName = columnDef.columnName ?? (modelProperty as string);
+        let value = dbRow[dbColumnName];
+
+        try {
+          if (value !== undefined && value !== null) {
+            if (
+              columnDef.type === PostgresDataType.TIMESTAMP ||
+              columnDef.type === PostgresDataType.TIMESTAMPTZ
+            ) {
+              entity[modelProperty] = this.convertToTimestamp(
+                value,
+                modelProperty,
+                modelName
+              );
+            } else if (columnDef.type === PostgresDataType.DATE) {
+              entity[modelProperty] = this.convertToDateObject(
+                value,
+                modelProperty,
+                modelName
+              );
+            } else if (
+              columnDef.type === PostgresDataType.JSON ||
+              columnDef.type === PostgresDataType.JSONB
+            ) {
+              entity[modelProperty] = value;
+            } else if (
+              (columnDef.type === PostgresDataType.INTEGER ||
+                columnDef.type === PostgresDataType.BIGINT ||
+                columnDef.type === PostgresDataType.SMALLINT) &&
+              typeof value === "string"
+            ) {
+              entity[modelProperty] = parseInt(value, 10);
+            } else if (
+              columnDef.type === PostgresDataType.REAL ||
+              columnDef.type === PostgresDataType.DOUBLE_PRECISION ||
+              columnDef.type === PostgresDataType.NUMERIC
+            ) {
+              if (typeof value === "string") {
+                entity[modelProperty] = parseFloat(value);
+              } else {
+                entity[modelProperty] = value;
+              }
+            } else {
+              entity[modelProperty] = value;
+            }
+          } else if (columnDef.default !== undefined) {
+            entity[modelProperty] =
+              typeof columnDef.default === "function"
+                ? columnDef.default()
+                : columnDef.default;
+          } else if (columnDef.nullable) {
+            entity[modelProperty] = null;
+          } else {
+            this.logger.warn(
+              `Cột '${String(
+                modelProperty
+              )}' (${modelName}) không nullable, không có giá trị default, và không có giá trị từ DB.`
             );
-            return String(value); // Fallback to string representation
+            entity[modelProperty] = undefined;
           }
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `Lỗi khi chuyển đổi giá trị cho cột '${String(
+              modelProperty
+            )}' của model '${modelName}' từ định dạng database: ${errorMessage}`
+          );
+          this.logger.error(`Nguyên nhân gốc: ${String(error)}`);
+          throw new OrmError(
+            `Lỗi chuyển đổi dữ liệu từ DB cho cột ${String(
+              modelProperty
+            )} trong model ${modelName}`,
+            OrmErrorCode.DATA_TRANSFORMATION_ERROR
+          );
         }
-        // If it's already a string, assume it's pre-stringified or a primitive that can be stored directly.
-        return value;
-      // Potentially add more type-specific conversions here (e.g., boolean, numeric types if needed)
-      // For now, other types are returned as-is, relying on driver compatibility.
-      default:
-        return value;
+      }
     }
+    return entity as T;
   }
 
-  /**
-   * Chuyển đổi giá trị từ PostgreSQL sang định dạng phù hợp cho JavaScript
-   * @param value Giá trị cần chuyển đổi
-   * @param type Kiểu dữ liệu PostgreSQL
-   */
-  private static convertValueFromDatabase(
-    value: unknown,
-    columnDef: ColumnDefinition,
-    propertyName?: string // Added for logging
-  ): unknown {
-    if (value === null || value === undefined) {
-      return undefined; // Represent SQL NULL as undefined on the entity
+  public getTableName<T extends object>(modelName: ModelName): string {
+    const schema = this.getSchema<T>(modelName);
+    if (!schema) {
+      this.logger.error(
+        `[getTableName] Không tìm thấy schema cho model ${modelName}`
+      );
+      throw new OrmError(
+        `Schema không tồn tại cho model: ${modelName}`,
+        OrmErrorCode.MODEL_NOT_REGISTERED
+      );
+    }
+    return schema.tableName;
+  }
+
+  public getColumnName<T extends object>(
+    modelName: ModelName,
+    modelProperty: ColumnName<T>
+  ): string {
+    const schema = this.getSchema<T>(modelName);
+    if (!schema) {
+      this.logger.error(
+        `[getColumnName] Không tìm thấy schema cho model ${modelName}`
+      );
+      throw new OrmError(
+        `Schema không tồn tại cho model: ${modelName}`,
+        OrmErrorCode.MODEL_NOT_REGISTERED
+      );
+    }
+    const columnDef = schema.columns[modelProperty];
+    if (!columnDef) {
+      this.logger.error(
+        `[getColumnName] Không tìm thấy định nghĩa cho thuộc tính ${String(
+          modelProperty
+        )} trong model ${modelName}`
+      );
+      throw new OrmError(
+        `Thuộc tính không tồn tại: ${String(
+          modelProperty
+        )} trong model ${modelName}`,
+        OrmErrorCode.MODEL_PROPERTY_NOT_FOUND_ERROR
+      );
+    }
+    return columnDef.columnName ?? (modelProperty as string);
+  }
+
+  public getModelDefinition<T extends object>(
+    modelName: ModelName
+  ): ModelDefinition<T> {
+    const modelClass = this.getModel<T>(modelName);
+    const schema = this.getSchema<T>(modelName);
+
+    if (!modelClass || !schema) {
+      this.logger.error(
+        `[getModelDefinition] Không tìm thấy model hoặc schema cho ${modelName}`
+      );
+      throw new OrmError(
+        `Model hoặc schema không tồn tại: ${modelName}`,
+        OrmErrorCode.MODEL_NOT_REGISTERED
+      );
     }
 
-    switch (columnDef.type) {
-      case PostgresDataType.DATE:
-      case PostgresDataType.TIMESTAMP:
-      case PostgresDataType.TIMESTAMPTZ:
-        return ModelManager.convertToDateObject(value, columnDef.type);
-      case PostgresDataType.JSON:
-      case PostgresDataType.JSONB:
-        if (typeof value === "string") {
-          try {
-            return JSON.parse(value);
-          } catch (error) {
-            ModelManager.loggerService?.error(
-              `Failed to parse JSON/JSONB for property '${propertyName ?? "(unknown)"}' (column: ${columnDef.columnName ?? "auto"}): ${error instanceof Error ? error.message : String(error)}`
-            );
-            return value; // Return original string if parsing fails
-          }
-        }
-        // If it's not a string (e.g., already an object if driver auto-parses), return as is.
-        return value;
-      case PostgresDataType.INTEGER:
-      case PostgresDataType.BIGINT:
-      case PostgresDataType.SMALLINT:
-        if (typeof value === "string") {
-          const num = Number(value);
-          return isNaN(num) ? value : num; // Return original string if not a valid number
-        }
-        return value; // If already a number or other type, return as is.
-      case PostgresDataType.NUMERIC:
-      case PostgresDataType.REAL:
-      case PostgresDataType.DOUBLE_PRECISION:
-        if (typeof value === "string") {
-          const num = parseFloat(value);
-          return isNaN(num) ? value : num; // Return original string if not a valid number
-        }
-        return value;
-      case PostgresDataType.BOOLEAN:
-        if (typeof value === "string") {
-          if (value.toLowerCase() === "true") return true;
-          if (value.toLowerCase() === "false") return false;
-        }
-        // Rely on driver to return boolean, or handle common string representations.
-        // For 't'/'f' from some DBs or other specific string bools, more checks can be added.
-        return Boolean(value); // General conversion attempt
-      default:
-        return value;
+    return {
+      name: modelName,
+      tableName: schema.tableName,
+      columns: schema.columns,
+      relations: schema.relations || {},
+      modelClass,
+    };
+  }
+
+  public getAllModelDefinitions(): ModelDefinition<any>[] {
+    const definitions: ModelDefinition<any>[] = [];
+    for (const modelName of this.models.keys()) {
+      try {
+        definitions.push(this.getModelDefinition(modelName));
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        this.logger.warn(
+          `Bỏ qua model '${modelName}' khi lấy tất cả định nghĩa do lỗi: ${errorMessage}`
+        );
+        this.logger.warn(
+          `Nguyên nhân gốc khi getAllModelDefinitions: ${String(error)}`
+        );
+      }
     }
+    return definitions;
   }
 }

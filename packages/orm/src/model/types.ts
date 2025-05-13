@@ -91,39 +91,6 @@ export interface ColumnDefinition {
 }
 
 /**
- * Định nghĩa một khóa ngoại
- */
-export interface ForeignKeyDefinition {
-  /**
-   * Tên cột trong bảng hiện tại
-   */
-  columnName: string;
-
-  /**
-   * Tên bảng tham chiếu
-   */
-  referencedTable: string;
-
-  /**
-   * Tên cột tham chiếu trong bảng tham chiếu
-   * @default 'id'
-   */
-  referencedColumn?: string;
-
-  /**
-   * Hành động khi xóa bản ghi tham chiếu
-   * @default 'NO ACTION'
-   */
-  onDelete?: "CASCADE" | "SET NULL" | "SET DEFAULT" | "RESTRICT" | "NO ACTION";
-
-  /**
-   * Hành động khi cập nhật bản ghi tham chiếu
-   * @default 'NO ACTION'
-   */
-  onUpdate?: "CASCADE" | "SET NULL" | "SET DEFAULT" | "RESTRICT" | "NO ACTION";
-}
-
-/**
  * Định nghĩa một chỉ mục
  */
 export interface IndexDefinition {
@@ -164,11 +131,6 @@ export interface ModelMetadata {
    * Định nghĩa các cột
    */
   columns: Record<string, ColumnDefinition>;
-
-  /**
-   * Định nghĩa các khóa ngoại
-   */
-  foreignKeys?: ForeignKeyDefinition[];
 
   /**
    * Định nghĩa các chỉ mục

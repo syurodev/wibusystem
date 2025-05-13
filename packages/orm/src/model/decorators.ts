@@ -1,7 +1,6 @@
 import { toPluralSnakeCase, toSnakeCase } from "../utils";
 import {
   ColumnDefinition,
-  ForeignKeyDefinition,
   IndexDefinition,
   MODEL_REGISTRY,
   ModelMetadata,
@@ -129,49 +128,6 @@ export function PrimaryGeneratedColumn(
     autoIncrement: true,
     nullable: false,
   });
-}
-
-/**
- * Decorator để đánh dấu một thuộc tính là foreign key
- * @param options Tùy chọn cho foreign key
- */
-export function ForeignKey(
-  options: Omit<ForeignKeyDefinition, "columnName">
-): any {
-  return function (target: any, propertyKey: string | symbol): any {
-    // Hỗ trợ cả decorator cũ và mới
-    const className =
-      typeof target === "function" ? target.name : target.constructor.name;
-
-    // Chuyển đổi propertyKey thành string nếu nó là symbol
-    const propKey = propertyKey.toString();
-
-    // Khởi tạo metadata cho model nếu chưa tồn tại
-    if (!MODEL_REGISTRY.has(className)) {
-      MODEL_REGISTRY.set(className, {
-        columns: {},
-        foreignKeys: [],
-        indexes: [],
-        schema: "public",
-      });
-    }
-
-    const metadata = MODEL_REGISTRY.get(className)!;
-
-    // Tạo tên cột mặc định nếu không được cung cấp
-    const columnName = toSnakeCase(propKey);
-
-    // Thêm định nghĩa foreign key vào metadata
-    metadata.foreignKeys ??= [];
-
-    metadata.foreignKeys.push({
-      columnName,
-      referencedTable: options.referencedTable,
-      referencedColumn: options.referencedColumn ?? "id",
-      onDelete: options.onDelete ?? "NO ACTION",
-      onUpdate: options.onUpdate ?? "NO ACTION",
-    });
-  };
 }
 
 /**

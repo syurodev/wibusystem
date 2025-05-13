@@ -35,8 +35,35 @@ Package ORM được thiết kế để tương tác với PostgreSQL, tập tru
   - Phương thức dễ dàng để gọi các stored procedures trong PostgreSQL và nhận kết quả trả về.
   - Ví dụ: `db.callProcedure('my_procedure_name', [param1, param2])`
 - **Hỗ trợ Full-Text Search:**
-  - Tích hợp khả năng thực hiện truy vấn full-text search của PostgreSQL (sử dụng `to_tsvector`, `to_tsquery`, toán tử `@@`).
-  - API thân thiện trong Query Builder, ví dụ: `db.select().from('documents').whereFullText('content_vector', 'search term')`
+
+  - Tích hợp khả năng thực hiện truy vấn full-text search của PostgreSQL.
+  - Query Builder sẽ cung cấp các phương thức để làm việc với cột `tsvector` và hàm `to_tsquery` (hoặc `plainto_tsquery`, `phraseto_tsquery`, `websearch_to_tsquery`).
+  - API thân thiện trong Query Builder, ví dụ:
+
+    ```typescript
+    // Tìm kiếm đơn giản
+    db.select()
+      .from("documents")
+      .whereTsVectorMatches("content_vector", "search term")
+      .execute();
+
+    // Tìm kiếm với ngôn ngữ cụ thể và ranking
+    db.select(["title", "ts_rank_cd(content_vector, query) AS rank"])
+      .from("documents")
+      .whereTsVectorMatches("content_vector", "search term", {
+        queryFunction: "plainto_tsquery", // hoặc 'to_tsquery', 'phraseto_tsquery', 'websearch_to_tsquery'
+        config: "english", // Ngôn ngữ FTS
+        rank: {
+          function: "ts_rank_cd", // hoặc 'ts_rank'
+          normalization: 32, // Tùy chọn
+          weights: [0.1, 0.2, 0.4, 1.0], // Tùy chọn
+        },
+      })
+      .orderBy("rank", "DESC")
+      .execute();
+    ```
+
+  - ORM cần hỗ trợ việc tạo index GIN hoặc GiST trên các cột `tsvector` để đảm bảo hiệu năng truy vấn.
 
 ### 2.4. Giao dịch (Transactions)
 
@@ -66,6 +93,7 @@ Package ORM được thiết kế để tương tác với PostgreSQL, tập tru
   - **`Date`** (TypeScript) <-> `BIGINT` (PostgreSQL): Đối tượng `Date` trong TypeScript sẽ được chuyển đổi thành Unix timestamp (số mili giây hoặc giây kể từ 1/1/1970 UTC) và lưu trữ dưới dạng `BIGINT`. Khi đọc ra, giá trị `BIGINT` sẽ được chuyển đổi ngược lại thành đối tượng `Date`.
   - **`Array`** (TypeScript) <-> `ARRAY` (PostgreSQL) cho các kiểu dữ liệu cơ bản (ví dụ: `string[]` <-> `TEXT[]`).
   - **`object` / `any`** (TypeScript) <-> `JSONB` hoặc `JSON` (PostgreSQL) cho dữ liệu có cấu trúc động.
+  - **`string` (đại diện cho `tsvector` / `tsquery`)** (TypeScript) <-> `TSVECTOR` / `TSQUERY` (PostgreSQL): Các kiểu dữ liệu FTS của PostgreSQL sẽ được xử lý như chuỗi trong mã TypeScript. Việc tạo và chuyển đổi giá trị (ví dụ: dùng `to_tsvector()`) thường được thực hiện ở phía database hoặc thông qua các hàm của Query Builder.
 - Người dùng có thể cần chỉ định rõ kiểu PostgreSQL trong một số trường hợp để đảm bảo độ chính xác.
 
 ### 2.8. Quy ước Đặt tên (Naming Conventions)
@@ -172,6 +200,23 @@ async function main() {
         );
       });
     }
+
+    // Ví dụ Full-Text Search
+    interface Document {
+      id: number;
+      title: string;
+      content_vector: string; // Đại diện cho tsvector
+      // ... các trường khác
+    }
+    const searchResults = await db
+      .select<Document>()
+      .from("documents")
+      .whereTsVectorMatches("content_vector", "typescript ORM", {
+        config: "english",
+      })
+      .execute();
+
+    console.log("Search results:", searchResults.rows);
 
     // Gọi Stored Procedure
     const result = await db.callProcedure("get_user_count", [true]);

@@ -6,7 +6,35 @@ import { TIMEZONES } from "./constants";
 // It's often better to be explicit in functions as done below.
 
 /**
+ * Converts a JavaScript Date object or a Luxon DateTime object to a Unix timestamp (milliseconds).
+ * @param input The JavaScript Date object or Luxon DateTime object.
+ * @returns Unix timestamp in milliseconds.
+ */
+export const convertToMillis = (input: Date | DateTime): number => {
+  if (input instanceof Date) {
+    return DateTime.fromJSDate(input).toMillis();
+  }
+  // Assumes input is a Luxon DateTime object if not a JS Date
+  return input.toMillis();
+};
+
+/**
+ * Converts a Unix timestamp (milliseconds) to a JavaScript Date object.
+ * For use by external packages that should not depend on Luxon.DateTime.
+ * @param ms Unix timestamp in milliseconds.
+ * @param zone The IANA zone string (e.g., TIMEZONES.UTC, TIMEZONES.ASIA_HO_CHI_MINH). Defaults to TIMEZONES.UTC.
+ * @returns A JavaScript Date object.
+ */
+export const convertFromMillis = (
+  ms: number,
+  zone: string = TIMEZONES.UTC
+): Date => {
+  return DateTime.fromMillis(ms, { zone }).toJSDate();
+};
+
+/**
  * Converts a Unix timestamp (milliseconds) to a Luxon DateTime object.
+ * Primarily for internal use within @repo/common or for consumers that work with Luxon.DateTime.
  * @param ms Unix timestamp in milliseconds.
  * @param zone The IANA zone string (e.g., TIMEZONES.UTC, TIMEZONES.ASIA_HO_CHI_MINH). Defaults to TIMEZONES.UTC.
  * @returns A Luxon DateTime object.
@@ -29,15 +57,6 @@ export const fromSecondsToDateTime = (
   zone: string = TIMEZONES.UTC
 ): DateTime => {
   return DateTime.fromSeconds(seconds, { zone });
-};
-
-/**
- * Converts a Luxon DateTime object to a Unix timestamp (milliseconds).
- * @param dt The Luxon DateTime object.
- * @returns Unix timestamp in milliseconds.
- */
-export const toMillisFromDateTime = (dt: DateTime): number => {
-  return dt.toMillis();
 };
 
 /**

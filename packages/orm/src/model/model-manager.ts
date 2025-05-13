@@ -1,6 +1,7 @@
+import { convertFromMillis, convertToMillis } from "@repo/common";
 import { ModelNotRegisteredError } from "../errors/model-errors";
 import { toSnakeCase } from "../utils";
-import { MODEL_REGISTRY, ModelMetadata } from "./types";
+import { MODEL_REGISTRY, ModelMetadata, PostgresDataType } from "./types";
 
 /**
  * Class quản lý các model trong ORM
@@ -68,7 +69,10 @@ export class ModelManager {
         const columnName = columnDef.columnName ?? toSnakeCase(propertyName);
 
         // Chuyển đổi giá trị nếu cần
-        result[columnName] = this.convertValueToDatabase(value, columnDef.type);
+        result[columnName] = this.convertValueToDatabase(
+          value,
+          columnDef.type as PostgresDataType
+        );
       }
     }
 
@@ -101,7 +105,7 @@ export class ModelManager {
         // Chuyển đổi giá trị nếu cần
         result[propertyName] = this.convertValueFromDatabase(
           value,
-          columnDef.type
+          columnDef.type as PostgresDataType
         );
       }
     }
@@ -110,37 +114,162 @@ export class ModelManager {
   }
 
   /**
+   * Helper function to convert various date/time representations to a Unix timestamp (milliseconds).
+   * @param value The value to convert (Date instance, number, or string).
+   * @param dbType The target database type (for logging purposes).
+   */
+  private convertToTimestamp(
+    value: unknown,
+    dbType: PostgresDataType
+  ): number | null {
+    if (value instanceof Date) {
+      return convertToMillis(value);
+    }
+    if (typeof value === "number") {
+      return value; // Assume it's already a Unix timestamp in milliseconds
+    }
+    if (typeof value === "string") {
+      try {
+        const dateFromString = new Date(value);
+        if (!isNaN(dateFromString.getTime())) {
+          return convertToMillis(dateFromString);
+        }
+      } catch (e) {
+        console.warn(
+          `Lỗi khi parse chuỗi '${value}' thành Date cho kiểu DB '${dbType}':`,
+          e instanceof Error ? e.message : String(e)
+        );
+      }
+    }
+    return null; // Return null if conversion is not possible
+  }
+
+  /**
    * Chuyển đổi giá trị từ JavaScript sang định dạng phù hợp cho PostgreSQL
    * @param value Giá trị cần chuyển đổi
    * @param type Kiểu dữ liệu PostgreSQL
    */
-  private convertValueToDatabase(value: any, type: string): any {
+  private convertValueToDatabase(
+    value: unknown,
+    type: PostgresDataType
+  ): unknown {
     if (value === undefined || value === null) {
       return null;
     }
 
     switch (type) {
-      case "BOOLEAN":
-        // Chuyển boolean thành 1 hoặc 0
+      case PostgresDataType.BOOLEAN:
         return value ? 1 : 0;
-      case "DATE":
-      case "TIMESTAMP":
-      case "TIMESTAMPTZ":
-        // Chuyển Date thành ISO string
-        if (value instanceof Date) {
-          return value.toISOString();
+      case PostgresDataType.DATE:
+      case PostgresDataType.TIMESTAMP:
+      case PostgresDataType.TIMESTAMPTZ: {
+        const timestamp = this.convertToTimestamp(value, type);
+        if (timestamp !== null) {
+          return timestamp;
         }
-        return value;
-      case "JSON":
-      case "JSONB":
-        // Chuyển object thành JSON string
-        if (typeof value === "object") {
+        const displayValue =
+          typeof value === "object" ? JSON.stringify(value) : String(value);
+        console.warn(
+          `Không thể chuyển đổi giá trị '${displayValue}' (kiểu: ${typeof value}) sang Unix timestamp cho kiểu DB '${type}'. Giữ nguyên giá trị.`
+        );
+        return value; // Return original value if conversion failed
+      }
+      case PostgresDataType.JSON:
+      case PostgresDataType.JSONB:
+        if (typeof value === "object" && value !== null) {
           return JSON.stringify(value);
         }
+        // If value is already a string, assume it's pre-formatted JSON.
+        // PostgreSQL will validate if it's a valid JSON string.
         return value;
       default:
         return value;
     }
+  }
+
+  // Helper methods for convertToDateObject to reduce complexity
+  private _tryParseStringAsTimestamp(
+    stringValue: string,
+    dbType: PostgresDataType
+  ): Date | null {
+    try {
+      const numValue = parseInt(stringValue, 10);
+      if (!isNaN(numValue)) {
+        const dateFromNumString = convertFromMillis(numValue);
+        if (
+          dateFromNumString instanceof Date &&
+          !isNaN(dateFromNumString.getTime())
+        ) {
+          return dateFromNumString;
+        }
+      }
+    } catch (e) {
+      // This catch is for unexpected errors during parsing or conversion.
+      // parseInt and convertFromMillis typically return NaN/null for invalid formats rather than throwing.
+      console.warn(
+        `Lỗi không mong muốn khi parse chuỗi số '${stringValue}' cho kiểu DB '${dbType}':`,
+        e instanceof Error ? e.message : String(e)
+      );
+    }
+    return null;
+  }
+
+  private _tryParseStringAsDateString(
+    stringValue: string,
+    dbType: PostgresDataType
+  ): Date | null {
+    try {
+      const dateFromString = new Date(stringValue);
+      if (!isNaN(dateFromString.getTime())) {
+        return dateFromString;
+      }
+    } catch (e) {
+      // This catch is for unexpected errors. new Date() typically returns an Invalid Date object.
+      console.warn(
+        `Lỗi không mong muốn khi parse chuỗi ngày '${stringValue}' trực tiếp cho kiểu DB '${dbType}':`,
+        e instanceof Error ? e.message : String(e)
+      );
+    }
+    return null;
+  }
+
+  /**
+   * Helper function to convert a database value (number or string) to a Date object.
+   * @param value The database value to convert.
+   * @param dbType The source database type (for logging purposes).
+   */
+  private convertToDateObject(
+    value: unknown,
+    dbType: PostgresDataType
+  ): Date | null {
+    if (typeof value === "number") {
+      const dateFromMillis = convertFromMillis(value);
+      if (dateFromMillis instanceof Date && !isNaN(dateFromMillis.getTime())) {
+        return dateFromMillis;
+      }
+      return null; // If conversion from number failed or resulted in invalid Date
+    }
+
+    if (typeof value === "string") {
+      // Try parsing as a numeric timestamp string first
+      const dateFromTimestampString = this._tryParseStringAsTimestamp(
+        value,
+        dbType
+      );
+      if (dateFromTimestampString) {
+        return dateFromTimestampString;
+      }
+
+      // If that fails, try parsing as a general date string
+      const dateFromDateString = this._tryParseStringAsDateString(
+        value,
+        dbType
+      );
+      if (dateFromDateString) {
+        return dateFromDateString;
+      }
+    }
+    return null; // If not a number or a parsable string, or if all parsing attempts failed
   }
 
   /**
@@ -148,41 +277,53 @@ export class ModelManager {
    * @param value Giá trị cần chuyển đổi
    * @param type Kiểu dữ liệu PostgreSQL
    */
-  private convertValueFromDatabase(value: any, type: string): any {
+  private convertValueFromDatabase(
+    value: unknown,
+    type: PostgresDataType
+  ): unknown {
     if (value === null || value === undefined) {
       return null;
     }
 
     switch (type) {
-      case "BOOLEAN":
-        // Chuyển 1/0 thành boolean
-        return (
-          value === 1 || value === true || value === "1" || value === "true"
-        );
-      case "DATE":
-      case "TIMESTAMP":
-      case "TIMESTAMPTZ":
-        // Chuyển ISO string thành Date
+      case PostgresDataType.BOOLEAN:
+        // More robust boolean conversion from various database representations
+        if (typeof value === "boolean") return value;
+        if (typeof value === "number") return value === 1;
         if (typeof value === "string") {
-          return new Date(value);
+          const lowerValue = value.toLowerCase();
+          return lowerValue === "true" || lowerValue === "1";
         }
-        // Chuyển timestamp (số) thành Date
-        if (typeof value === "number") {
-          return new Date(value);
+        return false; // Default to false if type is uncertain but matched BOOLEAN
+      case PostgresDataType.DATE:
+      case PostgresDataType.TIMESTAMP:
+      case PostgresDataType.TIMESTAMPTZ: {
+        const dateObject = this.convertToDateObject(value, type);
+        if (dateObject) {
+          return dateObject;
         }
-        return value;
-      case "JSON":
-      case "JSONB":
-        // Chuyển JSON string thành object
+        const displayValue =
+          typeof value === "object" && value !== null
+            ? JSON.stringify(value)
+            : String(value);
+        console.warn(
+          `Không thể chuyển đổi giá trị '${displayValue}' (kiểu: ${typeof value}) từ DB (kiểu DB: '${type}') sang Date object. Giữ nguyên giá trị.`
+        );
+        return value; // Return original value if conversion failed
+      }
+      case PostgresDataType.JSON:
+      case PostgresDataType.JSONB:
         if (typeof value === "string") {
           try {
             return JSON.parse(value);
           } catch (error) {
-            // Nếu không thể parse JSON, ghi log và trả về giá trị gốc
-            console.warn(`Không thể parse JSON: ${(error as Error).message}`);
-            return value;
+            console.warn(
+              `Không thể parse JSON: ${error instanceof Error ? error.message : String(error)}. Giữ nguyên giá trị.`
+            );
+            return value; // Return original value if parsing failed
           }
         }
+        // If it's not a string (e.g., pg driver already parsed it to an object), return as is.
         return value;
       default:
         return value;

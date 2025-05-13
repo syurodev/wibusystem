@@ -1,3 +1,4 @@
+import { convertToMillis } from "@repo/common";
 import { Column, PrimaryGeneratedColumn } from "./decorators";
 import { PostgresDataType } from "./types";
 
@@ -35,7 +36,7 @@ export abstract class BaseEntity {
     type: PostgresDataType.BIGINT,
     nullable: false,
     description: "Thời gian tạo (Unix timestamp - milliseconds)",
-    default: () => Date.now(), // Sẽ được thay thế bằng toMillisFromDateTime(now()) khi sử dụng thực tế
+    default: () => convertToMillis(new Date()),
   })
   createdAt!: number;
 
@@ -45,10 +46,11 @@ export abstract class BaseEntity {
    */
   @Column({
     type: PostgresDataType.BIGINT,
-    nullable: true,
+    nullable: false,
     description: "Thời gian cập nhật (Unix timestamp - milliseconds)",
+    default: () => convertToMillis(new Date()),
   })
-  updatedAt?: number;
+  updatedAt!: number;
 
   /**
    * Chuyển đổi createdAt thành đối tượng Date
@@ -60,10 +62,10 @@ export abstract class BaseEntity {
 
   /**
    * Chuyển đổi updatedAt thành đối tượng Date
-   * @returns Đối tượng Date hoặc undefined nếu updatedAt là undefined
+   * @returns Đối tượng Date
    */
-  getUpdatedAtDate(): Date | undefined {
-    return this.updatedAt ? new Date(this.updatedAt) : undefined;
+  getUpdatedAtDate(): Date {
+    return new Date(this.updatedAt);
   }
 
   /**
@@ -78,48 +80,53 @@ export abstract class BaseEntity {
    * ```
    */
   updateTimestamp(): void {
-    this.updatedAt = Date.now(); // Sẽ được thay thế bằng toMillisFromDateTime(now()) khi sử dụng thực tế
+    this.updatedAt = convertToMillis(new Date());
   }
 
   /**
-   * Chuyển đổi createdAt thành đối tượng DateTime của Luxon sử dụng @repo/common
-   * @param zone Múi giờ (mặc định là UTC)
-   * @returns Đối tượng DateTime của Luxon
+   * Chuyển đổi createdAt thành một kiểu dữ liệu thời gian tùy ý (ví dụ: Date hoặc Luxon DateTime)
+   * bằng cách sử dụng hàm chuyển đổi được cung cấp từ @repo/common hoặc tùy chỉnh.
+   * @param converter Hàm chuyển đổi từ milliseconds (number) sang kiểu T.
+   *                  Ví dụ: `convertFromMillis` từ `@repo/common` để lấy JS Date,
+   *                  hoặc `fromMillisToDateTime` từ `@repo/common` để lấy Luxon DateTime.
+   * @param zone Múi giờ tùy chọn cho việc chuyển đổi.
+   * @returns Đối tượng kiểu T.
    * @example
    * ```typescript
-   * import { fromMillisToDateTime } from "@repo/common/utils/date";
+   * import { convertFromMillis, fromMillisToDateTime } from "@repo/common";
    *
-   * // Trong class kế thừa từ BaseEntity
-   * const dateTime = fromMillisToDateTime(this.createdAt, "Asia/Ho_Chi_Minh");
+   * const jsDate = entity.getCreatedAtConverted(convertFromMillis, "Asia/Ho_Chi_Minh");
+   * const luxonDateTime = entity.getCreatedAtConverted(fromMillisToDateTime, "Europe/London");
    * ```
    */
-  getCreatedAtDateTime<T>(
-    fromMillisToDateTime: (ms: number, zone?: string) => T,
+  getCreatedAtConverted<T>(
+    converter: (ms: number, zone?: string) => T,
     zone?: string
   ): T {
-    return fromMillisToDateTime(this.createdAt, zone);
+    return converter(this.createdAt, zone);
   }
 
   /**
-   * Chuyển đổi updatedAt thành đối tượng DateTime của Luxon sử dụng @repo/common
-   * @param fromMillisToDateTime Hàm chuyển đổi từ milliseconds sang DateTime
-   * @param zone Múi giờ (mặc định là UTC)
-   * @returns Đối tượng DateTime của Luxon hoặc undefined nếu updatedAt là undefined
+   * Chuyển đổi updatedAt thành một kiểu dữ liệu thời gian tùy ý (ví dụ: Date hoặc Luxon DateTime)
+   * bằng cách sử dụng hàm chuyển đổi được cung cấp từ @repo/common hoặc tùy chỉnh.
+   * @param converter Hàm chuyển đổi từ milliseconds (number) sang kiểu T.
+   *                  Ví dụ: `convertFromMillis` từ `@repo/common` để lấy JS Date,
+   *                  hoặc `fromMillisToDateTime` từ `@repo/common` để lấy Luxon DateTime.
+   * @param zone Múi giờ tùy chọn cho việc chuyển đổi.
+   * @returns Đối tượng kiểu T.
    * @example
    * ```typescript
-   * import { fromMillisToDateTime } from "@repo/common/utils/date";
+   * import { convertFromMillis, fromMillisToDateTime } from "@repo/common";
    *
-   * // Trong class kế thừa từ BaseEntity
-   * const dateTime = this.getUpdatedAtDateTime(fromMillisToDateTime, "Asia/Ho_Chi_Minh");
+   * const jsDate = entity.getUpdatedAtConverted(convertFromMillis, "Asia/Ho_Chi_Minh");
+   * const luxonDateTime = entity.getUpdatedAtConverted(fromMillisToDateTime, "Europe/London");
    * ```
    */
-  getUpdatedAtDateTime<T>(
-    fromMillisToDateTime: (ms: number, zone?: string) => T,
+  getUpdatedAtConverted<T>(
+    converter: (ms: number, zone?: string) => T,
     zone?: string
-  ): T | undefined {
-    return this.updatedAt
-      ? fromMillisToDateTime(this.updatedAt, zone)
-      : undefined;
+  ): T {
+    return converter(this.updatedAt, zone);
   }
 
   /**
@@ -157,7 +164,7 @@ export abstract class BaseEntity {
    * @param format Định dạng (mặc định là dd/MM/yyyy HH:mm:ss)
    * @param zone Múi giờ (mặc định là UTC)
    * @param locale Ngôn ngữ (mặc định là en-US)
-   * @returns Chuỗi đã định dạng hoặc undefined nếu updatedAt là undefined
+   * @returns Chuỗi đã định dạng
    * @example
    * ```typescript
    * import { formatMillis, COMMON_DATE_FORMATS, TIMEZONES } from "@repo/common/utils/date";
@@ -176,46 +183,7 @@ export abstract class BaseEntity {
     format?: string,
     zone?: string,
     locale?: string
-  ): string | undefined {
-    return this.updatedAt
-      ? formatMillis(this.updatedAt, format, zone, locale)
-      : undefined;
+  ): string {
+    return formatMillis(this.updatedAt, format, zone, locale);
   }
-}
-
-/**
- * Decorator để tự động cập nhật trường updatedAt khi entity được cập nhật
- *
- * Lưu ý: Trong thực tế, bạn nên sử dụng hàm từ @repo/common như sau:
- * ```
- * import { now, toMillisFromDateTime } from "@repo/common/utils/date";
- *
- * // Trong decorator AutoUpdateTimestamp
- * updatedAt = toMillisFromDateTime(now());
- * ```
- *
- * @param constructor Constructor của class
- */
-export function AutoUpdateTimestamp<
-  T extends new (...args: any[]) => Record<string, any>,
->(constructor: T): T {
-  return class extends constructor {
-    constructor(...args: any[]) {
-      super(...args);
-
-      // Ghi đè phương thức toJSON nếu có
-      // Lưu ý: Đây là cách đơn giản để minh họa, trong thực tế bạn nên sử dụng cách tiếp cận khác
-      // để tránh sử dụng any và đảm bảo type safety
-      const self = this;
-      const originalToJSON = self.toJSON;
-
-      if (typeof originalToJSON === "function") {
-        self.toJSON = function () {
-          // Sẽ được thay thế bằng toMillisFromDateTime(now()) khi sử dụng thực tế
-          self.updatedAt = Date.now();
-          return originalToJSON.apply(this);
-        };
-      }
-    }
-  };
 }

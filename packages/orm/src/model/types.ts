@@ -21,6 +21,8 @@ export enum PostgresDataType {
   JSONB = "JSONB",
   UUID = "UUID",
   ARRAY = "ARRAY",
+  TSVECTOR = "TSVECTOR",
+  TSQUERY = "TSQUERY",
 }
 
 /**

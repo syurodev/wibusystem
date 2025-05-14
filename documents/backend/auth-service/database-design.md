@@ -1,160 +1,192 @@
-# Tài liệu Thiết kế Cơ sở dữ liệu: Auth Service
+# Thiết kế Cơ sở dữ liệu cho Dịch vụ Xác thực (Auth Service)
 
-**Phiên bản:** 1.1
-**Ngày tạo:** {{CURRENT_DATE}}
-**Ngày cập nhật:** {{CURRENT_DATE}}
+Tài liệu này mô tả thiết kế chi tiết của cơ sở dữ liệu PostgreSQL cho `auth-service`, tuân thủ các quy tắc đã định nghĩa trong `database-rule.mdc`.
 
----
+## Quy ước chung
 
-## 1. Giới thiệu
+- Tên bảng và tên cột: `snake_case`.
+- Kiểu dữ liệu cho timestamp: `bigint` (lưu trữ Unix timestamp - số giây tính từ epoch).
+- Kiểu dữ liệu cho các trường trạng thái (status): `smallint`.
+- Khóa chính (`id`) luôn là kiểu dữ liệu tự tăng (`serial` hoặc `bigserial`).
+- Không sử dụng khóa ngoại (foreign key constraints). Việc quản lý tính nhất quán dữ liệu giữa các bảng sẽ được xử lý ở tầng ứng dụng.
+- Các trường `created_ts` và `updated_ts` được sử dụng để theo dõi thời gian tạo và cập nhật bản ghi.
 
-Tài liệu này mô tả chi tiết thiết kế cơ sở dữ liệu cho Dịch vụ Xác thực và Quản lý Người dùng (Auth Service). Cơ sở dữ liệu được sử dụng là PostgreSQL, và việc tương tác với cơ sở dữ liệu sẽ thông qua Drizzle ORM.
+## Sơ đồ Quan hệ Thực thể (ERD) - Văn bản (Logic)
 
-Thiết kế này tuân thủ các quy tắc đã được định nghĩa trong `database-rule.mdc`:
+```
++-------------+       +------------------+       +---------------+
+|    users    |       |    user_roles    |       |     roles     |
++-------------+       +------------------+       +---------------+
+      |                       |  (references users.id) |
+      |                       |  (references roles.id) |
+      |
++---------------------+
+| password_reset_otps |
+| (references users.id) |
++---------------------+
+      |
++---------------------+
+|   refresh_tokens  |
+| (references users.id) |
++---------------------+
 
-- Tên bảng và tên cột luôn được đặt dạng `snake_case`.
-- Không sử dụng relationship ở mức ORM/logic (sử dụng bảng map cho quan hệ nhiều-nhiều và truy vấn riêng). Khóa ngoại (Foreign Keys) vẫn được sử dụng ở mức cơ sở dữ liệu để đảm bảo tính toàn vẹn dữ liệu. Điều này áp dụng cho cả các mối quan hệ 1-1 (nếu có), dữ liệu sẽ được truy vấn riêng biệt.
-- Các trường dữ liệu chứa trạng thái (ví dụ: `account_status`) sẽ được lưu dạng số (ví dụ: `smallint`).
-- Các trường thời gian phải được lưu dưới dạng Unix timestamp (`bigint`).
-- Các trường `id` chính của bảng sẽ là kiểu `serial` (integer tự tăng).
-
-## 2. Định nghĩa Lược đồ (Schema)
-
-Dưới đây là định nghĩa chi tiết cho từng bảng trong cơ sở dữ liệu của `auth-service`.
-
-### 2.1. Bảng: `users`
-
-Lưu trữ thông tin người dùng.
-
-| Tên cột             | Kiểu dữ liệu   | Ràng buộc                                 | Mô tả                                                                                                       |
-| ------------------- | -------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `id`                | `serial`       | Primary Key                               | ID tự tăng duy nhất của người dùng.                                                                         |
-| `username`          | `varchar(50)`  | Unique, Not Null                          | Tên định danh duy nhất của người dùng.                                                                      |
-| `display_name`      | `varchar(200)` | Nullable                                  | Tên hiển thị của người dùng.                                                                                |
-| `email`             | `varchar(255)` | Unique, Not Null                          | Địa chỉ email của người dùng, dùng để đăng nhập.                                                            |
-| `hashed_password`   | `varchar(255)` | Not Null                                  | Mật khẩu đã được hash an toàn của người dùng.                                                               |
-| `avatar_url`        | `text`         | Nullable                                  | URL ảnh đại diện của người dùng.                                                                            |
-| `email_verified_ts` | `bigint`       | Nullable                                  | Unix timestamp thời điểm email được xác thực (cho giai đoạn sau).                                           |
-| `account_status`    | `smallint`     | Not Null, Default: 0                      | Trạng thái tài khoản (0: active, 1: inactive, 2: suspended). Ánh xạ tới `UserStatusEnum` từ `@repo/common`. |
-| `created_ts`        | `bigint`       | Not Null, Default: current Unix timestamp | Unix timestamp thời điểm tạo tài khoản.                                                                     |
-| `updated_ts`        | `bigint`       | Not Null, Default: current Unix timestamp | Unix timestamp thời điểm cập nhật tài khoản lần cuối.                                                       |
-| `deleted_ts`        | `bigint`       | Nullable                                  | Unix timestamp thời điểm xoá mềm tài khoản.                                                                 |
-
-### 2.2. Bảng: `password_reset_otps`
-
-Lưu trữ thông tin OTP (One-Time Password) cho việc đặt lại mật khẩu.
-
-| Tên cột      | Kiểu dữ liệu  | Ràng buộc                                 | Mô tả                                                               |
-| ------------ | ------------- | ----------------------------------------- | ------------------------------------------------------------------- |
-| `id`         | `serial`      | Primary Key                               | ID tự tăng duy nhất của bản ghi OTP.                                |
-| `user_id`    | `integer`     | Not Null, Foreign Key (`users.id`)        | ID của người dùng yêu cầu đặt lại mật khẩu.                         |
-| `otp_value`  | `varchar(10)` | Not Null                                  | Giá trị OTP (MVP: "111111", sau này là OTP thật hoặc hash của OTP). |
-| `expires_ts` | `bigint`      | Not Null                                  | Unix timestamp thời điểm OTP hết hạn.                               |
-| `created_ts` | `bigint`      | Not Null, Default: current Unix timestamp | Unix timestamp thời điểm tạo OTP.                                   |
-| `used_ts`    | `bigint`      | Nullable                                  | Unix timestamp thời điểm OTP được sử dụng.                          |
-
-### 2.3. Bảng: `roles`
-
-Lưu trữ thông tin về các vai trò trong hệ thống.
-
-| Tên cột       | Kiểu dữ liệu  | Ràng buộc                                 | Mô tả                                                                                 |
-| ------------- | ------------- | ----------------------------------------- | ------------------------------------------------------------------------------------- |
-| `id`          | `serial`      | Primary Key                               | ID tự tăng duy nhất của vai trò.                                                      |
-| `name`        | `varchar(50)` | Unique, Not Null                          | Tên vai trò (ví dụ: 'SYSTEM_ADMIN', 'USER'). Ánh xạ tới `RoleEnum` từ `@repo/common`. |
-| `description` | `text`        | Nullable                                  | Mô tả chi tiết về vai trò.                                                            |
-| `created_ts`  | `bigint`      | Not Null, Default: current Unix timestamp | Unix timestamp thời điểm tạo vai trò.                                                 |
-| `updated_ts`  | `bigint`      | Not Null, Default: current Unix timestamp | Unix timestamp thời điểm cập nhật vai trò lần cuối.                                   |
-
-### 2.4. Bảng: `permissions`
-
-Lưu trữ thông tin về các quyền hạn trong hệ thống.
-
-| Tên cột       | Kiểu dữ liệu   | Ràng buộc                                 | Mô tả                                                                                            |
-| ------------- | -------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `id`          | `serial`       | Primary Key                               | ID tự tăng duy nhất của quyền.                                                                   |
-| `name`        | `varchar(100)` | Unique, Not Null                          | Tên quyền (ví dụ: 'CONTENT_VIEW', 'USER_MANAGE'). Ánh xạ tới `PermissionEnum` từ `@repo/common`. |
-| `description` | `text`         | Nullable                                  | Mô tả chi tiết về quyền.                                                                         |
-| `group_name`  | `varchar(50)`  | Nullable                                  | Tên nhóm quyền (ví dụ: 'user_management', 'article_management').                                 |
-| `created_ts`  | `bigint`       | Not Null, Default: current Unix timestamp | Unix timestamp thời điểm tạo quyền.                                                              |
-| `updated_ts`  | `bigint`       | Not Null, Default: current Unix timestamp | Unix timestamp thời điểm cập nhật quyền lần cuối.                                                |
-
-### 2.5. Bảng: `user_roles` (Bảng map)
-
-Bảng trung gian để map mối quan hệ nhiều-nhiều giữa người dùng và vai trò.
-
-| Tên cột         | Kiểu dữ liệu | Ràng buộc                                 | Mô tả                                                |
-| --------------- | ------------ | ----------------------------------------- | ---------------------------------------------------- |
-| `user_id`       | `integer`    | Not Null, Foreign Key (`users.id`)        | ID của người dùng.                                   |
-| `role_id`       | `integer`    | Not Null, Foreign Key (`roles.id`)        | ID của vai trò.                                      |
-| `assigned_ts`   | `bigint`     | Not Null, Default: current Unix timestamp | Unix timestamp thời điểm gán vai trò cho người dùng. |
-| **Primary Key** |              | (`user_id`, `role_id`)                    |                                                      |
-
-### 2.6. Bảng: `role_permissions` (Bảng map)
-
-Bảng trung gian để map mối quan hệ nhiều-nhiều giữa vai trò và quyền hạn.
-
-| Tên cột         | Kiểu dữ liệu | Ràng buộc                                 | Mô tả                                           |
-| --------------- | ------------ | ----------------------------------------- | ----------------------------------------------- |
-| `role_id`       | `integer`    | Not Null, Foreign Key (`roles.id`)        | ID của vai trò.                                 |
-| `permission_id` | `integer`    | Not Null, Foreign Key (`permissions.id`)  | ID của quyền.                                   |
-| `assigned_ts`   | `bigint`     | Not Null, Default: current Unix timestamp | Unix timestamp thời điểm gán quyền cho vai trò. |
-| **Primary Key** |              | (`role_id`, `permission_id`)              |                                                 |
-
-## 3. Chỉ mục (Indexes)
-
-### 3.1. Chỉ mục B-Tree (Standard Indexes)
-
-Các chỉ mục sau được đề xuất để cải thiện hiệu năng truy vấn:
-
-- **Bảng `users`:**
-  - `idx_users_email`: Trên cột `email` (unique index được tạo tự động).
-  - `idx_users_username`: Trên cột `username` (unique index được tạo tự động).
-  - `idx_users_id`: Trên cột `id` (tự động tạo cho Primary Key).
-- **Bảng `password_reset_otps`:**
-  - `idx_password_reset_otps_user_id`: Trên cột `user_id`.
-- **Bảng `roles`:**
-  - `idx_roles_name`: Trên cột `name` (unique index được tạo tự động).
-- **Bảng `permissions`:**
-  - `idx_permissions_name`: Trên cột `name` (unique index được tạo tự động).
-- **Bảng `user_roles`:**
-  - `idx_user_roles_user_id`: Trên cột `user_id`.
-  - `idx_user_roles_role_id`: Trên cột `role_id`.
-- **Bảng `role_permissions`:**
-  - `idx_role_permissions_role_id`: Trên cột `role_id`.
-  - `idx_role_permissions_permission_id`: Trên cột `permission_id`.
-
-### 3.2. Chỉ mục cho Full-Text Search (FTS)
-
-Để hỗ trợ tìm kiếm toàn văn bản hiệu quả trên các trường tên, cần tạo các chỉ mục GIN hoặc GiST trên cột `tsvector`.
-
-- **Bảng `users`:**
-  - Cho `username`: Tạo một cột `tsvector` từ `username` và đánh index GIN/GiST trên đó.
-  - Cho `display_name`: Tạo một cột `tsvector` từ `display_name` và đánh index GIN/GiST trên đó.
-
-**Ví dụ (PostgreSQL):**
-
-```sql
--- Đối với bảng users, cột username
-ALTER TABLE users ADD COLUMN username_tsv tsvector;
-UPDATE users SET username_tsv = to_tsvector('simple', username); -- Hoặc ngôn ngữ khác
-CREATE INDEX users_username_tsv_idx ON users USING gin(username_tsv);
--- Cần có trigger để tự động cập nhật cột tsv khi username thay đổi.
-
--- Tương tự cho display_name.
+                                       +---------------------+       +---------------------+
+                                       |  role_permissions   |       |    permissions    |
+                                       +---------------------+       +---------------------+
+                                         (references roles.id)
+                                         (references permissions.id)
 ```
 
-Lưu ý: Việc chọn 'simple' hay một cấu hình ngôn ngữ cụ thể (ví dụ: 'english') cho `to_tsvector` phụ thuộc vào yêu cầu của ngôn ngữ tìm kiếm. Cần thiết lập trigger để tự động cập nhật các cột `tsvector` khi dữ liệu gốc thay đổi.
+**Ghi chú:**
 
-## 4. Lưu ý về "Relationships" và Khóa ngoại
+- Các bảng liên kết logic với nhau thông qua các cột `id` (ví dụ: `user_roles.user_id` tham chiếu logic tới `users.id`).
+- `users` có thể có nhiều `refresh_tokens`.
+- `users` có thể có nhiều `password_reset_otps`.
 
-Theo `database-rule.mdc`, chúng ta "không sử dụng relationship trong bất kỳ tình huống nào (sử dụng bảng map thay thế)". Điều này được hiểu là:
+## Chi tiết các bảng
 
-- **Quan hệ Nhiều-Nhiều (Many-to-Many):** Luôn sử dụng bảng map (ví dụ: `user_roles`, `role_permissions`) như đã thiết kế. Khóa ngoại (Foreign Key constraints) VẪN được sử dụng trong các bảng map này để đảm bảo tính toàn vẹn dữ liệu.
-- **Quan hệ Một-Nhiều (One-to-Many):**
-  - Ở mức cơ sở dữ liệu, khóa ngoại (Foreign Key constraints) VẪN được sử dụng (ví dụ: `password_reset_otps.user_id` tham chiếu đến `users.id`) để đảm bảo tính toàn vẹn và nhất quán của dữ liệu.
-- **Quan hệ Một-Một (One-to-One):**
-  - Sẽ KHÔNG sử dụng khóa ngoại (Foreign Key constraints) ở mức cơ sở dữ liệu cho các mối quan hệ 1-1. Việc đảm bảo tính toàn vẹn dữ liệu cho các mối quan hệ này sẽ được xử lý ở tầng ứng dụng. Quyết định này được đưa ra nhằm mục đích tối ưu hóa hiệu suất cho các tác vụ chèn (insert) và cho phép kiểm soát logic toàn vẹn dữ liệu một cách linh hoạt ở tầng ứng dụng.
-- **Truy vấn dữ liệu liên quan:**
-  - Ở mức ORM (Drizzle) hoặc logic ứng dụng, chúng ta sẽ không định nghĩa các "relations" lồng nhau để tự động join và lấy dữ liệu liên quan cho bất kỳ loại quan hệ nào (1-1, 1-N, M-N). Thay vào đó, các truy vấn sẽ được thực hiện riêng biệt cho từng bảng khi cần. Ví dụ, để lấy thông tin OTP của một user, sẽ có một truy vấn đến bảng `password_reset_otps` với `user_id` cụ thể. Tương tự, nếu có một bảng profile (quan hệ 1-1 với user), chúng ta sẽ truy vấn bảng profile đó riêng biệt bằng `user_id`.
+### 1. Bảng `users`
 
-Cách tiếp cận này giúp giữ cho các truy vấn đơn giản, dễ kiểm soát và tuân thủ quy tắc đã đặt ra, đồng thời cân bằng giữa việc đảm bảo tính toàn vẹn dữ liệu (thông qua khóa ngoại ở những nơi cần thiết và logic ứng dụng) và hiệu suất hệ thống.
+Lưu trữ thông tin cơ bản của người dùng.
+
+| Tên cột           | Kiểu dữ liệu   | Ràng buộc                                       | Mô tả                                                                                                                               |
+| ----------------- | -------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `id`              | `bigserial`    | `PRIMARY KEY`                                   | ID duy nhất của người dùng (tự tăng).                                                                                               |
+| `email`           | `varchar(255)` | `UNIQUE`, `NOT NULL`                            | Địa chỉ email của người dùng (dùng để đăng nhập).                                                                                   |
+| `hashed_password` | `varchar(255)` | `NOT NULL`                                      | Mật khẩu đã được hash của người dùng.                                                                                               |
+| `account_status`  | `smallint`     | `NOT NULL`, `DEFAULT 0`                         | Trạng thái tài khoản (ví dụ: 0: Pending, 1: Active, 2: Suspended, 3: Banned). Tham chiếu đến `UserStatusEnum` trong `@repo/common`. |
+| `full_name`       | `varchar(255)` |                                                 | Tên đầy đủ của người dùng (tùy chọn).                                                                                               |
+| `avatar_url`      | `text`         |                                                 | URL ảnh đại diện của người dùng (tùy chọn).                                                                                         |
+| `last_login_ts`   | `bigint`       |                                                 | Unix timestamp của lần đăng nhập cuối cùng.                                                                                         |
+| `created_ts`      | `bigint`       | `NOT NULL`, `DEFAULT extract(epoch from now())` | Unix timestamp khi tài khoản được tạo.                                                                                              |
+| `updated_ts`      | `bigint`       | `NOT NULL`, `AUTO_UPDATE_ON_CHANGE`             | Unix timestamp được tự động cập nhật mỗi khi thông tin tài khoản thay đổi.                                                          |
+
+**Indexes:**
+
+- `idx_users_email` ON `users` (`email`)
+- `idx_users_account_status` ON `users` (`account_status`)
+
+### 2. Bảng `roles`
+
+Định nghĩa các vai trò trong hệ thống (ví dụ: admin, user, editor).
+
+| Tên cột       | Kiểu dữ liệu  | Ràng buộc                                       | Mô tả                                                                                     |
+| ------------- | ------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `id`          | `serial`      | `PRIMARY KEY`                                   | ID duy nhất của vai trò (tự tăng).                                                        |
+| `name`        | `varchar(50)` | `UNIQUE`, `NOT NULL`                            | Tên của vai trò (ví dụ: "ADMIN", "USER"). Tham chiếu đến `RoleEnum` trong `@repo/common`. |
+| `description` | `text`        |                                                 | Mô tả chi tiết về vai trò (tùy chọn).                                                     |
+| `created_ts`  | `bigint`      | `NOT NULL`, `DEFAULT extract(epoch from now())` | Unix timestamp khi vai trò được tạo.                                                      |
+| `updated_ts`  | `bigint`      | `NOT NULL`, `AUTO_UPDATE_ON_CHANGE`             | Unix timestamp được tự động cập nhật mỗi khi thông tin vai trò thay đổi.                  |
+
+**Indexes:**
+
+- `idx_roles_name` ON `roles` (`name`)
+
+### 3. Bảng `permissions`
+
+Định nghĩa các quyền hạn chi tiết trong hệ thống (ví dụ: create_user, delete_post).
+
+| Tên cột       | Kiểu dữ liệu   | Ràng buộc                                       | Mô tả                                                                                                              |
+| ------------- | -------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `id`          | `serial`       | `PRIMARY KEY`                                   | ID duy nhất của quyền hạn (tự tăng).                                                                               |
+| `name`        | `varchar(100)` | `UNIQUE`, `NOT NULL`                            | Tên của quyền hạn (ví dụ: "users:create", "posts:read_all"). Tham chiếu đến `PermissionEnum` trong `@repo/common`. |
+| `description` | `text`         |                                                 | Mô tả chi tiết về quyền hạn (tùy chọn).                                                                            |
+| `group_name`  | `varchar(50)`  | `NOT NULL`                                      | Tên nhóm quyền hạn (ví dụ: "User Management", "Content Management").                                               |
+| `created_ts`  | `bigint`       | `NOT NULL`, `DEFAULT extract(epoch from now())` | Unix timestamp khi quyền hạn được tạo.                                                                             |
+| `updated_ts`  | `bigint`       | `NOT NULL`, `AUTO_UPDATE_ON_CHANGE`             | Unix timestamp được tự động cập nhật mỗi khi thông tin quyền hạn thay đổi.                                         |
+
+**Indexes:**
+
+- `idx_permissions_name` ON `permissions` (`name`)
+- `idx_permissions_group_name` ON `permissions` (`group_name`)
+
+### 4. Bảng `user_roles`
+
+Bảng trung gian để quản lý mối quan hệ many-to-many giữa `users` và `roles`.
+
+| Tên cột       | Kiểu dữ liệu | Ràng buộc                                       | Mô tả                                                |
+| ------------- | ------------ | ----------------------------------------------- | ---------------------------------------------------- |
+| `user_id`     | `bigint`     | `NOT NULL`                                      | ID của người dùng (tham chiếu logic tới `users.id`). |
+| `role_id`     | `integer`    | `NOT NULL`                                      | ID của vai trò (tham chiếu logic tới `roles.id`).    |
+| `assigned_ts` | `bigint`     | `NOT NULL`, `DEFAULT extract(epoch from now())` | Unix timestamp khi vai trò được gán cho người dùng.  |
+|               |              | `PRIMARY KEY (user_id, role_id)`                | Khóa chính kết hợp.                                  |
+
+**Indexes:**
+
+- `idx_user_roles_user_id` ON `user_roles` (`user_id`)
+- `idx_user_roles_role_id` ON `user_roles` (`role_id`)
+
+### 5. Bảng `role_permissions`
+
+Bảng trung gian để quản lý mối quan hệ many-to-many giữa `roles` và `permissions`.
+
+| Tên cột         | Kiểu dữ liệu | Ràng buộc                                       | Mô tả                                                     |
+| --------------- | ------------ | ----------------------------------------------- | --------------------------------------------------------- |
+| `role_id`       | `integer`    | `NOT NULL`                                      | ID của vai trò (tham chiếu logic tới `roles.id`).         |
+| `permission_id` | `integer`    | `NOT NULL`                                      | ID của quyền hạn (tham chiếu logic tới `permissions.id`). |
+| `assigned_ts`   | `bigint`     | `NOT NULL`, `DEFAULT extract(epoch from now())` | Unix timestamp khi quyền hạn được gán cho vai trò.        |
+|                 |              | `PRIMARY KEY (role_id, permission_id)`          | Khóa chính kết hợp.                                       |
+
+**Indexes:**
+
+- `idx_role_permissions_role_id` ON `role_permissions` (`role_id`)
+- `idx_role_permissions_permission_id` ON `role_permissions` (`permission_id`)
+
+### 6. Bảng `refresh_tokens`
+
+Lưu trữ thông tin về các refresh token đang hoạt động để quản lý phiên đăng nhập và cơ chế xoay vòng token.
+
+| Tên cột       | Kiểu dữ liệu   | Ràng buộc                                       | Mô tả                                                                     |
+| ------------- | -------------- | ----------------------------------------------- | ------------------------------------------------------------------------- |
+| `id`          | `bigserial`    | `PRIMARY KEY`                                   | ID duy nhất của bản ghi refresh token (tự tăng).                          |
+| `user_id`     | `bigint`       | `NOT NULL`                                      | ID của người dùng sở hữu token này (tham chiếu logic tới `users.id`).     |
+| `token_hash`  | `varchar(255)` | `UNIQUE`, `NOT NULL`                            | Hash của refresh token (không lưu token gốc).                             |
+| `family_id`   | `uuid`         | `NOT NULL`                                      | ID để nhóm các token xoay vòng (token cũ và token mới sau khi xoay vòng). |
+| `device_info` | `text`         |                                                 | Thông tin thiết bị (ví dụ: User Agent) (tùy chọn).                        |
+| `ip_address`  | `varchar(45)`  |                                                 | Địa chỉ IP khi token được tạo (tùy chọn).                                 |
+| `is_active`   | `smallint`     | `NOT NULL`, `DEFAULT 1`                         | Trạng thái token (ví dụ: `1` cho active, `0` cho inactive/revoked).       |
+| `expires_ts`  | `bigint`       | `NOT NULL`                                      | Unix timestamp khi token hết hạn.                                         |
+| `created_ts`  | `bigint`       | `NOT NULL`, `DEFAULT extract(epoch from now())` | Unix timestamp khi token được tạo.                                        |
+| `revoked_ts`  | `bigint`       |                                                 | Unix timestamp khi token bị thu hồi (do logout, xoay vòng, v.v...).       |
+
+**Indexes:**
+
+- `idx_refresh_tokens_user_id` ON `refresh_tokens` (`user_id`)
+- `idx_refresh_tokens_token_hash` ON `refresh_tokens` (`token_hash`)
+- `idx_refresh_tokens_family_id` ON `refresh_tokens` (`family_id`)
+- `idx_refresh_tokens_expires_ts` ON `refresh_tokens` (`expires_ts`)
+
+### 7. Bảng `password_reset_otps`
+
+Lưu trữ mã OTP (One-Time Password) hoặc token dùng cho việc yêu cầu đặt lại mật khẩu.
+
+| Tên cột      | Kiểu dữ liệu   | Ràng buộc                                       | Mô tả                                                                         |
+| ------------ | -------------- | ----------------------------------------------- | ----------------------------------------------------------------------------- |
+| `id`         | `bigserial`    | `PRIMARY KEY`                                   | ID duy nhất của bản ghi OTP (tự tăng).                                        |
+| `user_id`    | `bigint`       | `NOT NULL`                                      | ID của người dùng yêu cầu đặt lại mật khẩu (tham chiếu logic tới `users.id`). |
+| `otp_hash`   | `varchar(255)` | `NOT NULL`                                      | Hash của OTP (không lưu OTP gốc).                                             |
+| `expires_ts` | `bigint`       | `NOT NULL`                                      | Unix timestamp khi OTP hết hạn.                                               |
+| `used_ts`    | `bigint`       |                                                 | Unix timestamp khi OTP được sử dụng (NULL nếu chưa sử dụng).                  |
+| `created_ts` | `bigint`       | `NOT NULL`, `DEFAULT extract(epoch from now())` | Unix timestamp khi OTP được tạo.                                              |
+
+**Indexes:**
+
+- `idx_password_reset_otps_user_id` ON `password_reset_otps` (`user_id`)
+- `idx_password_reset_otps_otp_hash` ON `password_reset_otps` (`otp_hash`)
+- `idx_password_reset_otps_expires_ts` ON `password_reset_otps` (`expires_ts`)
+
+## Enum và Tham chiếu
+
+- **`UserStatusEnum`**: Sẽ được định nghĩa trong `@repo/common`. Các giá trị dự kiến: `PENDING_VERIFICATION`, `ACTIVE`, `SUSPENDED`, `BANNED`.
+- **`RoleEnum`**: Sẽ được định nghĩa trong `@repo/common`. Các giá trị dự kiến: `SUPER_ADMIN`, `ADMIN`, `USER`, `GUEST`.
+- **`PermissionEnum`**: Sẽ được định nghĩa trong `@repo/common`. Cấu trúc tên quyền ví dụ: `RESOURCE:ACTION` (ví dụ: `USERS:CREATE`, `USERS:READ_ALL`, `PROFILE:UPDATE_OWN`).
+
+## Lưu ý thêm
+
+- Cân nhắc thêm cơ chế dọn dẹp (cleanup) cho các bảng như `refresh_tokens` (xóa token hết hạn) và `password_reset_otps` (xóa OTP hết hạn và đã sử dụng).
+- `DEFAULT extract(epoch from now())` được sử dụng để lấy Unix timestamp hiện tại (số giây).
+- Việc không sử dụng khóa ngoại đòi hỏi tầng ứng dụng phải đảm bảo tính toàn vẹn và nhất quán của dữ liệu khi thực hiện các thao tác CUD (Create, Update, Delete) liên quan đến các thực thể logic. Ví dụ, khi xóa một user, ứng dụng cần xóa các bản ghi liên quan trong `user_roles`, `refresh_tokens`, `password_reset_otps`.
+- Đối với `account_status` trong bảng `users`, `DEFAULT 0` giả định `0` là một trạng thái khởi tạo hợp lệ (ví dụ `PENDING_VERIFICATION` hoặc `ACTIVE` nếu không có bước xác minh). Điều này cần khớp với định nghĩa của `UserStatusEnum`.
+- Cột `family_id` trong `refresh_tokens` (vẫn giữ kiểu `uuid` để đảm bảo tính duy nhất toàn cục và khó đoán) giúp phát hiện việc sử dụng lại một refresh token đã bị xoay vòng. Khi một refresh token được sử dụng, nó sẽ bị vô hiệu hóa và một cặp token mới (access + refresh) được tạo ra với cùng `family_id`. Refresh token mới sẽ được lưu, token cũ bị đánh dấu `revoked_ts`.
+
+Tài liệu này sẽ được cập nhật khi có thay đổi hoặc yêu cầu mới.

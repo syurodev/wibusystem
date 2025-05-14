@@ -1,0 +1,27 @@
+{
+  "name": "@repo/config",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "dotenv": "^16.x.x",
+    "zod": "^3.x.x"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "*",
+    "@repo/typescript-config": "*",
+    "@types/node": "^18.x.x || ^20.x.x",
+    "eslint": "^8.x.x",
+    "tsup": "^8.x.x",
+    "typescript": "^5.x.x"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

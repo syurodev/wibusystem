@@ -1,0 +1,7 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+- dự án dùng turborepo nên hãy tuân theo cấu trúc của turborepo
+- luôn tách những phần có thể dùng chung ra các package

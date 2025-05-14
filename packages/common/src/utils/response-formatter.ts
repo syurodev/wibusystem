@@ -13,10 +13,8 @@ export interface ApiResponse<T = any> {
     details?: any;
   };
   pagination?: {
-    current_page: number;
-    per_page: number;
-    total_items: number;
-    total_pages: number;
+    total_record: number;
+    total_page: number;
   };
 }
 

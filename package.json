@@ -20,5 +20,9 @@
   "workspaces": [
     "apps/*",
     "packages/*"
-  ]
+  ],
+  "dependencies": {
+    "drizzle-orm": "^0.43.1",
+    "drizzle-typebox": "^0.3.2"
+  }
 }

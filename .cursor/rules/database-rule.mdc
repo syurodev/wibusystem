@@ -1,7 +1,7 @@
 ---
 description: 
 globs: 
-alwaysApply: false
+alwaysApply: true
 ---
 - tên bảng và tên cột luôn được đặt dạng snake_case
 - không sử dụng relationship trong bất kỳ tình huống nào (sử dụng bảng map thay thế)

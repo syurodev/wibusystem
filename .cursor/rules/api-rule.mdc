@@ -1,29 +1,6 @@
 ---
 description: 
 globs: 
-alwaysApply: false
+alwaysApply: true
 ---
 - api phải luôn được chi phiên bản (/api/v1/...)
-- dữ liệu trả về phải luôn đúng định dạng
-
-```json
-{
-  status: 200,
-  message_code: SUCCESS
-  message: thành công
-  data: {...}
-}
-
-// Hoặc định dạng sau đối với api có phân trang
-
-{
-  status: 200,
-  message_code: SUCCESS
-  message: thành công
-  data: {
-    total_record: 10,
-    total_page: 5,
-    list: [{...}]
-  }
-}
-```

@@ -1,0 +1,6 @@
+export enum DEFAULT {
+  PAGE_LIMIT = 20,
+  MAX_PAGE_LIMIT = 50,
+  PAGE_OFFSET = 0,
+  PAGE_NUMBER = 1,
+}

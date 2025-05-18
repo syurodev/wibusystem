@@ -1,0 +1,73 @@
+
+1. Luôn định nghĩa kiểu dữ liệu rõ ràng, tránh sử dụng `any`
+2. Sử dụng các tính năng mới nhất của TypeScript (khi phù hợp)
+3. Sử dụng các types của Bun thay vì node khi có thể
+4. Sử dụng dấu ngoặc nhọn ({}) cho tất cả các block, kể cả khi chỉ có một câu lệnh
+5. Sử dụng tên có ý nghĩa, dễ hiểu
+- Tránh sử dụng tên viết tắt, trừ khi chúng phổ biến (ví dụ: HTTP, URL)
+- Tránh sử dụng tên quá dài hoặc quá ngắn
+6. Quy ước đặt tên
+- **Files**: kebab-case (ví dụ: `user-service.ts`)
+- **Data Field**: snake_case (ví dụ: `is_active`)
+- **Classes**: PascalCase (ví dụ: `UserService`)
+- **Interfaces/Types**: PascalCase (ví dụ: `UserInterface`)
+- **Functions/Methods**: camelCase (ví dụ: `getUserById`)
+- **Variables**: camelCase (ví dụ: `userName`)
+- **Constants**: UPPER_SNAKE_CASE (ví dụ: `MAX_USERS`)
+- **Enums**: PascalCase cho tên enum, UPPER_SNAKE_CASE cho các giá trị (ví dụ: `enum UserRole { ADMIN = 0, USER = 1 }`)
+- **Components React**: PascalCase (ví dụ: `UserProfile`)
+7. Comments
+- Viết comments cho các đoạn code phức tạp
+- Sử dụng JSDoc để mô tả các functions, classes, interfaces
+- Tránh comments không cần thiết cho các đoạn code đơn giản
+- Cập nhật comments khi code thay đổi
+8. Imports
+- Sắp xếp imports theo thứ tự:
+  1. External packages
+  2. Internal packages
+  3. Local files
+- Sử dụng destructuring khi import nhiều thành phần từ cùng một module
+- Các packages dùng chung trong dự án sẻ được import từ `@repo/{tên package}`
+9. Quy tắc TypeScript
+- Luôn định nghĩa kiểu dữ liệu rõ ràng cho parameters, return values, và variables
+- Tránh sử dụng `any` khi có thể
+- Sử dụng interfaces cho objects có cấu trúc phức tạp
+- Sử dụng type aliases cho union types, intersection types, và các kiểu dữ liệu phức tạp khác
+- Sử dụng generics khi cần thiết để tăng tính tái sử dụng của code
+10. Enums
+- Sử dụng numeric enums thay vì string enums khi có thể
+- Luôn gán giá trị rõ ràng cho các enum members
+- Sử dụng UPPER_SNAKE_CASE cho các enum members
+11. Null và Undefined
+- Sử dụng `undefined` thay vì `null` khi có thể
+- Sử dụng optional chaining (`?.`) và nullish coalescing (`??`) để xử lý null và undefined
+- Tránh sử dụng non-null assertion operator (`!`) khi có thể
+12. Type Guards
+- Sử dụng type guards để thu hẹp kiểu dữ liệu
+- Tạo các custom type guards khi cần thiết
+13. Utility Types
+- Sử dụng các utility types của TypeScript khi phù hợp (Partial, Readonly, Pick, Omit, v.v.)
+14. Quy tắc cho Backend (Elysia.js)
+14.1. Cấu trúc dự án
+- Tổ chức code theo mô hình MVC (Model-View-Controller)
+- Tách biệt rõ ràng giữa routes, controllers, services, và repositories
+- Sử dụng dependency injection khi có thể
+14.2. Controllers
+
+- Controllers chỉ nên xử lý request và response
+- Không nên có business logic trong controllers
+- Sử dụng services cho business logic
+- Mỗi controller chỉ nên xử lý một resource
+
+14.3. Services
+
+- Services chứa business logic
+- Sử dụng Singleton pattern cho services
+- Services nên độc lập với framework
+
+14.4. Repositories
+
+- Repositories chịu trách nhiệm tương tác với database
+- Mỗi repository chỉ nên xử lý một entity
+- Repositories nên trả về plain objects, không phải ORM models
+- Viết các class để hứng dữ liệu trả về từ database nếu cần

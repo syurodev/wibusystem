@@ -1,16 +1,17 @@
 import { HttpStatusCode } from "../enums";
+import { MessageCode } from "../enums/message-code.enum";
 
 /**
  * Interface for a standardized API response.
  */
-export interface ApiResponse<T = any> {
-  success: boolean;
+export interface ApiResponse<T = unknown> {
+  is_success: boolean;
   status_code: HttpStatusCode;
   message: string; // Or use MessageCode enum for i18n
   data?: T;
   error?: {
-    code?: string; // Or use MessageCode enum
-    details?: any;
+    code?: MessageCode; // Or use MessageCode enum
+    details?: unknown;
   };
   pagination?: {
     total_record: number;
@@ -33,7 +34,7 @@ export function createSuccessResponse<T>(
   pagination?: ApiResponse<T>["pagination"]
 ): ApiResponse<T> {
   return {
-    success: true,
+    is_success: true,
     status_code: statusCode,
     message,
     data,
@@ -52,11 +53,11 @@ export function createSuccessResponse<T>(
 export function createErrorResponse(
   message: string,
   statusCode: HttpStatusCode = HttpStatusCode.INTERNAL_SERVER_ERROR,
-  errorCode?: string,
-  errorDetails?: any
+  errorCode?: MessageCode,
+  errorDetails?: unknown
 ): ApiResponse<null> {
   return {
-    success: false,
+    is_success: false,
     status_code: statusCode,
     message,
     error: {

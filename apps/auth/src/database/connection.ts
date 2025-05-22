@@ -1,67 +1,70 @@
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
-import { dbUserConfig } from "../configs";
-import * as schema from "../database/schema";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import { dbUserConfig } from "../configs"; // Import cấu hình DB
+import * as schema from "./schema"; // Import tất cả các schema từ ./schema/index.ts
 
-// Tạo connection string từ config.db.user
-// Lưu ý: PostgresqlConfig interface trong @repo/config có password là optional.
-// Cần đảm bảo password được cung cấp nếu database yêu cầu.
-const connectionString = `postgres://${dbUserConfig.username}:${dbUserConfig.password}@${dbUserConfig.host}:${dbUserConfig.port}/${dbUserConfig.dbname}`;
-
+// Kiểm tra xem các biến môi trường cần thiết đã được cung cấp chưa
 if (
   !dbUserConfig.host ||
   !dbUserConfig.port ||
   !dbUserConfig.username ||
+  !dbUserConfig.password ||
   !dbUserConfig.dbname
 ) {
-  console.error(
-    "Database connection parameters (host, port, username, dbname) are missing in @repo/config for db.user."
-  );
-  throw new Error("Database connection parameters are incomplete.");
+  console.error("Missing database configuration in environment variables.");
+  // Trong môi trường production, bạn có thể muốn throw error hoặc xử lý nghiêm ngặt hơn
+  // For now, we'll log an error and potentially let the app fail later if db connection is critical at startup
+  // throw new Error('Missing database configuration.');
 }
-// Không cần kiểm tra connectionString nữa vì nó được tạo từ các thành phần đã được kiểm tra (ít nhất là sự tồn tại)
 
-let dbInstance: ReturnType<typeof drizzle> | null = null;
-let pgClient: postgres.Sql | null = null;
+const connectionString = `postgresql://${dbUserConfig.username}:${dbUserConfig.password}@${dbUserConfig.host}:${dbUserConfig.port}/${dbUserConfig.dbname}`;
 
-/**
- * Khởi tạo và trả về một instance của Drizzle ORM.
- * Sử dụng singleton pattern để đảm bảo chỉ có một kết nối được tạo.
- */
-export function getDb() {
-  if (!dbInstance) {
-    try {
-      pgClient = postgres(connectionString, { max: 10 });
-      dbInstance = drizzle(pgClient, { schema });
-      console.log("Database connection established successfully.");
-    } catch (error) {
-      console.error("Failed to connect to database:", error);
-      throw error;
-    }
+const pool = new Pool({
+  connectionString,
+  // Bạn có thể thêm các cấu hình khác cho Pool ở đây nếu cần
+  // ví dụ: max clients, idle timeout, etc.
+  // ssl: {
+  //   rejectUnauthorized: false, // Cần thiết nếu kết nối tới DB yêu cầu SSL và không có CA hợp lệ
+  // },
+});
+
+// drizzle() nhận vào một client và một object tùy chọn có schema
+export const db = drizzle(pool, {
+  schema,
+  logger: process.env.NODE_ENV === "development",
+}); // Bật logger khi ở môi trường dev
+
+// Helper function để thực hiện transaction
+export const transaction = async <T>(
+  callback: (tx: any) => Promise<T>
+): Promise<T> => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const tx = drizzle(client, { schema });
+    const result = await callback(tx);
+
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
   }
-  return dbInstance;
-}
+};
 
-/**
- * Đóng kết nối cơ sở dữ liệu.
- * Quan trọng: gọi hàm này khi ứng dụng tắt để giải phóng tài nguyên.
- */
-export async function closeDbConnection() {
-  if (pgClient) {
-    await pgClient.end();
-    dbInstance = null;
-    pgClient = null;
-    console.log("Database connection closed.");
-  }
-}
+// Kiểm tra kết nối (tùy chọn, nhưng hữu ích)
+// (async () => {
+//   try {
+//     await pool.query('SELECT NOW()');
+//     console.log('Database connected successfully');
+//   } catch (error) {
+//     console.error('Failed to connect to the database:', error);
+//   }
+// })();
 
-// Có thể thêm các xử lý sự kiện cho kết nối ở đây nếu cần
-// Ví dụ: pgClient.on('error', ...)
-
-// Gọi getDb() một lần để khởi tạo kết nối khi module này được import lần đầu (tùy chọn)
-// getDb();
-
-// Lưu ý quan trọng về quản lý kết nối trong môi trường serverless:
-// Trong môi trường serverless (ví dụ: AWS Lambda), việc giữ kết nối mở giữa các lời gọi hàm
-// có thể không hiệu quả. Cân nhắc chiến lược kết nối/ngắt kết nối phù hợp.
-// Tuy nhiên, với ElysiaJS thường chạy như một server liên tục, việc giữ kết nối là phổ biến.
+// Bạn cũng có thể export pool nếu cần truy cập trực tiếp vào nó ở đâu đó
+export { pool };

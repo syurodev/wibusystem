@@ -3,11 +3,11 @@
  * @author Your Name
  */
 import { Elysia } from "elysia";
-import { authPlugin } from "./auth";
+import { v1Routes } from "./v1";
 
 /**
  * Tất cả các routes cho API version 1
  */
-export const v1Routes = new Elysia({
-  prefix: "/v1",
-}).use(authPlugin);
+export const appRoutes = new Elysia({
+  prefix: "/api",
+}).use(v1Routes);

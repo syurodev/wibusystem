@@ -14,7 +14,7 @@ Tài liệu này mô tả thiết kế kỹ thuật chi tiết cho Dịch vụ X
 
 ### 1.2. Phạm vi
 
-**Trong phạm vi (MVP - Giai đoạn 1):**
+**Trong phạm vi (Giai đoạn 1 - Mở rộng):**
 
 - Đăng ký tài khoản mới (email/mật khẩu).
 - Đăng nhập (email/mật khẩu).
@@ -24,16 +24,17 @@ Tài liệu này mô tả thiết kế kỹ thuật chi tiết cho Dịch vụ X
 - Xem thông tin cá nhân (User Profile).
 - Cập nhật thông tin cá nhân.
 - Quản lý phiên đăng nhập (xem và thu hồi).
+- **Xác thực đa yếu tố (MFA - TOTP là chủ yếu, SMS OTP có thể xem xét sau).**
+- **Đăng nhập bằng mạng xã hội (Social Login - ví dụ: Google, Facebook).**
+- **Quản lý thiết bị người dùng (xem danh sách, thu hồi thiết bị).**
+- **Xác minh email sau đăng ký (sử dụng verification tokens).**
 
-**Ngoài phạm vi (Giai đoạn sau):**
+**Ngoài phạm vi (Giai đoạn sau/Cân nhắc):**
 
-- Xác minh email sau đăng ký.
-- Đăng nhập bằng mạng xã hội (Social Login).
-- Xác thực đa yếu tố (MFA - TOTP, SMS OTP).
 - Quản lý Tổ chức/Đội nhóm.
-- Tích hợp gửi email cho các thông báo (xác thực, quên mật khẩu).
+- Tích hợp gửi email/SMS cho các thông báo (xác thực, quên mật khẩu, MFA).
 - API Keys.
-- Audit logging chi tiết.
+- Audit logging chi tiết (do đã có service riêng xử lý).
 
 ### 1.3. Tổng quan về dịch vụ
 
@@ -85,6 +86,32 @@ Tài liệu này mô tả thiết kế kỹ thuật chi tiết cho Dịch vụ X
 - **UC-AUTH-008: Quản lý phiên đăng nhập**
   - Người dùng có thể xem danh sách các thiết bị/phiên đang hoạt động của mình.
   - Người dùng có thể thu hồi một phiên đăng nhập cụ thể hoặc tất cả các phiên khác.
+- **UC-AUTH-009: Thiết lập Xác thực Đa yếu tố (MFA - TOTP)**
+  - Người dùng có thể kích hoạt MFA bằng ứng dụng xác thực (ví dụ: Google Authenticator, Authy).
+  - Hệ thống cung cấp QR code và secret key để người dùng cấu hình trong ứng dụng xác thực.
+  - Người dùng phải xác nhận bằng một mã TOTP để hoàn tất kích hoạt.
+  - Hệ thống cung cấp các mã khôi phục (backup codes) cho người dùng sau khi kích hoạt MFA thành công.
+- **UC-AUTH-010: Đăng nhập với MFA (TOTP)**
+  - Nếu MFA được kích hoạt, sau khi nhập đúng email và mật khẩu, người dùng được yêu cầu nhập mã TOTP từ ứng dụng xác thực.
+  - Đăng nhập thành công nếu mã TOTP hợp lệ.
+- **UC-AUTH-011: Sử dụng Mã khôi phục MFA**
+  - Người dùng có thể sử dụng một trong các mã khôi phục đã lưu để đăng nhập nếu không thể truy cập ứng dụng xác thực.
+  - Mỗi mã khôi phục chỉ có thể sử dụng một lần.
+- **UC-AUTH-012: Vô hiệu hóa MFA**
+  - Người dùng đã đăng nhập và đã kích hoạt MFA có thể chọn vô hiệu hóa MFA sau khi xác thực lại (ví dụ: bằng mật khẩu hoặc mã TOTP hiện tại).
+- **UC-AUTH-013: Liên kết tài khoản Mạng xã hội**
+  - Người dùng đã đăng nhập có thể liên kết tài khoản của họ với một hoặc nhiều nhà cung cấp OAuth (ví dụ: Google, Facebook).
+  - Người dùng chưa có tài khoản có thể đăng ký nhanh thông qua tài khoản mạng xã hội.
+- **UC-AUTH-014: Đăng nhập bằng Mạng xã hội**
+  - Người dùng có thể đăng nhập vào hệ thống bằng tài khoản mạng xã hội đã liên kết hoặc nếu họ chọn đăng ký/đăng nhập lần đầu qua mạng xã hội.
+- **UC-AUTH-015: Xác minh Email**
+  - Sau khi đăng ký, người dùng nhận được email chứa liên kết hoặc mã xác minh.
+  - Người dùng nhấp vào liên kết hoặc nhập mã để xác minh địa chỉ email của mình.
+  - Một số tính năng có thể bị hạn chế cho đến khi email được xác minh.
+- **UC-AUTH-016: Quản lý Thiết bị Đã biết**
+  - Người dùng có thể xem danh sách các thiết bị đã được sử dụng để đăng nhập vào tài khoản của họ (bao gồm thông tin như loại thiết bị, vị trí ước tính dựa trên IP, lần hoạt động cuối).
+  - Người dùng có thể đặt tên cho các thiết bị để dễ nhận biết.
+  - Người dùng có thể thu hồi quyền truy cập (đăng xuất từ xa) cho một thiết bị cụ thể.
 
 ### 2.2. Yêu cầu phi chức năng
 
@@ -154,7 +181,7 @@ graph LR
     - `@elysiajs/cookie`: Để xử lý cookies (nếu Refresh Token được lưu trong cookie).
     - `@elysiajs/swagger`: Để tự động tạo tài liệu API Swagger/OpenAPI.
 - **PostgreSQL Database (với Drizzle ORM):**
-  - Lưu trữ thông tin người dùng, mật khẩu đã hash, thông tin hồ sơ, và các dữ liệu liên quan khác.
+  - Lưu trữ thông tin người dùng, mật khẩu đã hash, thông tin hồ sơ, vai trò, quyền, token làm mới, mã OTP reset mật khẩu, **cài đặt xác thực đa yếu tố (MFA), mã khôi phục MFA, thông tin liên kết tài khoản mạng xã hội, thông tin thiết bị người dùng, và các token xác minh (ví dụ: xác minh email).**
   - Drizzle ORM sẽ được sử dụng để định nghĩa schema, thực hiện migrations, và truy vấn dữ liệu một cách an toàn và hiệu quả.
 - **Redis:**
   - Lưu trữ danh sách các Refresh Token đang hoạt động hoặc bị thu hồi (để quản lý session và đăng xuất).
@@ -220,11 +247,11 @@ graph LR
         "message_code": "USER_CREATED_SUCCESSFULLY",
         "message": "Người dùng đã được tạo thành công.",
         "data": {
-          "id": "uuid-user-id",
+          "id": "bigserial-user-id",
           "email": "user@example.com",
           "first_name": "John",
           "last_name": "Doe",
-          "created_ts": 1678886400 // Unix timestamp
+          "created_at": 1678886400 // Unix timestamp
         }
       }
       ```
@@ -440,13 +467,13 @@ graph LR
         "message_code": "USER_PROFILE_FETCHED",
         "message": "Lấy thông tin người dùng thành công.",
         "data": {
-          "id": "uuid-user-id",
+          "id": "bigserial-user-id",
           "email": "user@example.com",
           "first_name": "John",
           "last_name": "Doe",
           "avatar_url": "url_to_avatar",
-          "created_ts": 1678886400, // Unix timestamp
-          "updated_ts": 1678886400 // Unix timestamp
+          "created_at": 1678886400, // Unix timestamp
+          "updated_at": 1678886400 // Unix timestamp
         }
       }
       ```
@@ -478,13 +505,13 @@ graph LR
         "message_code": "USER_PROFILE_UPDATED",
         "message": "Cập nhật thông tin người dùng thành công.",
         "data": {
-          "id": "uuid-user-id",
+          "id": "bigserial-user-id",
           "email": "user@example.com",
           "first_name": "Jane",
           "last_name": "Doer",
           "avatar_url": "new_url_to_avatar",
-          "created_ts": 1678886400,
-          "updated_ts": 1678886405 // Unix timestamp mới
+          "created_at": 1678886400,
+          "updated_at": 1678886405 // Unix timestamp mới
         }
       }
       ```
@@ -525,8 +552,8 @@ graph LR
               "session_id": "redis_session_key_or_refresh_token_id",
               "ip_address": "192.168.1.10",
               "user_agent": "Chrome/90.0.4430.93",
-              "last_active_ts": 1678887000, // Unix timestamp
-              "created_ts": 1678886400 // Unix timestamp
+              "last_active_at": 1678887000, // Unix timestamp
+              "created_at": 1678886400 // Unix timestamp
             }
           ],
           "total_record": 1, // Ví dụ
@@ -608,45 +635,37 @@ graph LR
       }
       ```
 
-### 4.4. gRPC Interface cho Xác thực Token Nội bộ
+### 4.4. gRPC Interface (AuthValidatorService)
 
 Để phục vụ cho việc xác thực token từ API Gateway hoặc các microservices khác trong hệ thống, `auth-service` sẽ cung cấp một gRPC interface. Giao diện này cho phép các service nội bộ xác minh tính hợp lệ của một Access Token và nhận lại thông tin chi tiết (claims) của người dùng, bao gồm cả vai trò và quyền, để các service đó có thể tự thực hiện logic ủy quyền.
 
-**Service Definition (tham chiếu đến `@repo/grpc/protos/auth_service/v1/auth_validator.proto`):**
+**Service: `AuthValidatorService`**
 
-```protobuf
-// Nội dung file .proto sẽ được đặt trong package @repo/grpc
-// Ví dụ (tóm tắt lại, chi tiết tham khảo file proto thực tế):
-// syntax = "proto3";
-// package auth.v1;
-// import "google/protobuf/wrappers.proto"; // Nếu dùng wrapper types cho optional
-// import "common/v1/enums.proto"; // Ví dụ nếu RoleEnum, PermissionEnum có định nghĩa proto
+- **Method: `ValidateToken`**
+  - **Request:** `ValidateTokenRequest`
+    - `token: string` (Access Token cần xác thực)
+  - **Response:** `ValidateTokenResponse`
+    - `is_valid: bool`
+    - `user_id: string` (Nếu token hợp lệ)
+    - `email: string` (Nếu token hợp lệ)
+    - `roles: repeated string` (Danh sách tên vai trò nếu token hợp lệ)
+    - `permissions: repeated string` (Danh sách tên quyền nếu token hợp lệ)
+    - `error_code: string` (Mã lỗi nếu không hợp lệ, ví dụ: `TOKEN_EXPIRED`, `TOKEN_INVALID`, `USER_NOT_FOUND`, `USER_SUSPENDED`)
+    - `error_message: string` (Mô tả lỗi nếu không hợp lệ)
 
-// message UserClaims {
-//   string user_id = 1;
-//   string email = 2;
-//   repeated string roles = 3;        // Giá trị từ RoleEnum của @repo/common
-//   repeated string permissions = 4;  // Giá trị từ PermissionEnum của @repo/common
-//   map<string, string> custom_claims = 5;
-// }
-// ... (các message và service definition khác)
-```
+**Luồng hoạt động (gRPC - ValidateToken):**
 
-**Luồng hoạt động (ví dụ với API Gateway):**
-
-1.  API Gateway nhận request từ client với header `Authorization: Bearer <token>`.
-2.  Gateway trích xuất `<token>`.
-3.  Gateway gọi RPC `ValidateToken` đến `auth-service` với token này.
-4.  `auth-service` thực hiện logic xác thực:
-    - Kiểm tra tính hợp lệ của token (chữ ký, thời gian hết hạn, định dạng).
-    - Nếu token hợp lệ, trích xuất `user_id`.
-    - Truy vấn cơ sở dữ liệu (PostgreSQL) để lấy thông tin `roles` và `permissions` của `user_id`.
-    - Kiểm tra xem token có bị thu hồi (trong Redis) hay không.
+1.  API Gateway (hoặc một microservice khác) nhận request từ client, trích xuất Access Token từ header `Authorization`.
+2.  Gateway gọi method `AuthValidatorService.ValidateToken` của `auth-service` qua gRPC, gửi Access Token.
+3.  `auth-service` nhận request:
+    - Xác minh chữ ký và thời hạn của Access Token.
+    - Nếu token hợp lệ, trích xuất `userId`.
+    - Truy vấn DB (PostgreSQL) để lấy thông tin người dùng (ví dụ: `account_status`) và các vai trò/quyền liên quan.
     - Kiểm tra trạng thái của người dùng (ví dụ: có bị khóa không).
-5.  `auth-service` trả về `ValidateTokenResponse` với:
+4.  `auth-service` trả về `ValidateTokenResponse` với:
     - `is_valid = true` và `claims` (bao gồm `user_id`, `email`, `roles`, `permissions`) nếu token hợp lệ và người dùng hợp lệ.
     - `is_valid = false` và `error_code` (cùng `error_message`) nếu có lỗi.
-6.  Dựa trên `ValidateTokenResponse`, API Gateway (hoặc service gọi) quyết định:
+5.  Dựa trên `ValidateTokenResponse`, API Gateway (hoặc service gọi) quyết định:
     - Từ chối request nếu `is_valid = false`.
     - Nếu `is_valid = true`, Gateway sử dụng `claims.roles` và `claims.permissions` để thực hiện logic ủy quyền (ví dụ: kiểm tra người dùng có quyền truy cập vào một tài nguyên cụ thể không).
     - Gateway có thể enrich request gửi đến service nội bộ bằng cách thêm `user_id` hoặc các thông tin khác từ `claims` vào headers.
@@ -660,208 +679,14 @@ graph LR
 
 ## 5. Thiết kế Cơ sở dữ liệu (PostgreSQL với Drizzle ORM)
 
-### 5.1. Lựa chọn Cơ sở dữ liệu
+Chi tiết về thiết kế cơ sở dữ liệu, bao gồm sơ đồ, mô tả các bảng, cột, và indexes, được tài liệu hóa riêng biệt trong file: `documents/backend/auth-service/database-design.md`.
 
-- PostgreSQL: Mạnh mẽ, ổn định, hỗ trợ tốt các kiểu dữ liệu phức tạp.
-- Drizzle ORM: Type-safe SQL query builder cho TypeScript, gần gũi với SQL, hiệu năng tốt.
-
-### 5.2. Sơ đồ lược đồ (Schema - Drizzle Kit)
-
-(Sử dụng Drizzle Kit để tạo và quản lý schema, migrations)
-
-**Table: `users`**
-
-- `id`: `uuid` (Primary Key, default: `gen_random_uuid()`)
-- `email`: `varchar(255)` (Unique, Not Null)
-- `hashed_password`: `varchar(255)` (Not Null)
-- `first_name`: `varchar(100)`
-- `last_name`: `varchar(100)`
-- `avatar_url`: `text`
-- `email_verified_ts`: `bigint` (Nullable, Unix timestamp, cho giai đoạn sau)
-- `account_status`: `smallint` (Not Null, Default: 0, ví dụ: 0 - active, 1 - inactive, 2 - suspended. Các giá trị này sẽ ánh xạ tới `UserStatusEnum` từ `@repo/common`.)
-- `created_ts`: `bigint` (Not Null, Default: current Unix timestamp)
-- `updated_ts`: `bigint` (Not Null, Default: current Unix timestamp)
-- `deleted_ts`: `bigint` (Nullable, Unix timestamp, cho soft delete)
-
-**Table: `password_reset_otps`** (Đổi tên từ `password_reset_tokens` và điều chỉnh cho OTP)
-
-- `id`: `uuid` (Primary Key, default: `gen_random_uuid()`)
-- `user_id`: `uuid` (Foreign Key to `users.id`, Not Null, On Delete Cascade)
-- `otp_value`: `varchar(10)` (Not Null, trong MVP có thể lưu "111111", sau này sẽ là OTP thật hoặc hash của OTP)
-- `expires_ts`: `bigint` (Not Null, Unix timestamp)
-- `created_ts`: `bigint` (Not Null, Default: current Unix timestamp)
-- `used_ts`: `bigint` (Nullable, Unix timestamp, để đánh dấu OTP đã được sử dụng)
-
-**Table: `roles`**
-
-- `id`: `serial` (Primary Key, auto-increment) hoặc `uuid`
-- `name`: `varchar(50)` (Unique, Not Null, các giá trị tham chiếu `RoleEnum` từ `@repo/common`, ví dụ: 'SYSTEM_ADMIN', 'USER')
-- `description`: `text` (Nullable)
-- `created_ts`: `bigint` (Not Null, Default: current Unix timestamp)
-- `updated_ts`: `bigint` (Not Null, Default: current Unix timestamp)
-
-**Table: `permissions`**
-
-- `id`: `serial` (Primary Key, auto-increment) hoặc `uuid`
-- `name`: `varchar(100)` (Unique, Not Null, các giá trị tham chiếu `PermissionEnum` từ `@repo/common`, ví dụ: 'CONTENT_VIEW', 'USER_MANAGE')
-- `description`: `text` (Nullable)
-- `group_name`: `varchar(50)` (Nullable, để nhóm quyền, ví dụ: 'user_management', 'article_management')
-- `created_ts`: `bigint` (Not Null, Default: current Unix timestamp)
-- `updated_ts`: `bigint` (Not Null, Default: current Unix timestamp)
-
-**Table: `user_roles` (Mapping Table)**
-
-- `user_id`: `uuid` (Foreign Key to `users.id`, Not Null, On Delete Cascade)
-- `role_id`: `integer` (Foreign Key to `roles.id`, Not Null, On Delete Cascade)
-- `assigned_ts`: `bigint` (Not Null, Default: current Unix timestamp)
-- Primary Key: (`user_id`, `role_id`)
-
-**Table: `role_permissions` (Mapping Table)**
-
-- `role_id`: `integer` (Foreign Key to `roles.id`, Not Null, On Delete Cascade)
-- `permission_id`: `integer` (Foreign Key to `permissions.id`, Not Null, On Delete Cascade)
-- `assigned_ts`: `bigint` (Not Null, Default: current Unix timestamp)
-- Primary Key: (`role_id`, `permission_id`)
-
-_(Các bảng khác như `user_identities`, `mfa_factors`, `audit_logs` sẽ được thêm trong các giai đoạn sau)_
-
-### 5.3. Chỉ mục (Indexes)
-
-- `users`: `email` (unique index tự động tạo), `id`.
-- `password_reset_otps`: `user_id`, `otp_value` (nếu cần tìm kiếm theo OTP, nhưng thường là tìm theo user_id và kiểm tra OTP).
+Tài liệu `database-design.md` sẽ tuân thủ các quy ước đã đặt ra và bao gồm các bảng cần thiết cho việc quản lý người dùng, vai trò, quyền, phiên đăng nhập, refresh tokens, OTPs, cài đặt MFA, mã khôi phục MFA, liên kết tài khoản mạng xã hội, thông tin thiết bị và các token xác minh.
 
 ---
 
 ## 6. Thiết kế Redis
 
-### 6.1. Mục đích sử dụng
+Chi tiết về thiết kế Redis, bao gồm các cấu hình, sơ đồ, và các quy tắc quản lý dữ liệu, được tài liệu hóa riêng biệt trong file: `documents/backend/auth-service/redis-design.md`.
 
-- **Quản lý Refresh Tokens:** Lưu trữ hash của Refresh Token (hoặc chính token nếu nó là opaque) cùng với `userId` và thời gian hết hạn.
-  - Key: `refresh_token:<hashed_refresh_token_or_id>`
-  - Value: `userId`
-  - TTL: Thời gian sống của Refresh Token.
-- **Danh sách đen JWT (Blacklist - nếu cần):** Lưu trữ `jti` (JWT ID) của các Access Token đã bị vô hiệu hóa (ví dụ khi đổi mật khẩu, đăng xuất toàn bộ) cho đến khi chúng hết hạn tự nhiên. Token này được lưu với `key: jwt_blacklist:<jti>` và `value: 1` (hoặc `true`), `TTL: thời gian sống còn lại của Access Token`.
-- **Password Reset OTPs (MVP):**
-  - Key: `otp:password_reset:<user_id_or_email>` (ví dụ: `otp:password_reset:user@example.com`)
-  - Value: OTP (ví dụ: "111111" trong MVP, hoặc hash của OTP thật sau này)
-  - TTL: Ngắn (ví dụ: 5-10 phút).
-- **Rate Limiting:**
-  - Key: `rate_limit:<endpoint_or_action>:<user_id_or_ip>`
-  - Value: `count`
-  - TTL: Khoảng thời gian của rate limit (ví dụ: 1 phút, 1 giờ).
-
----
-
-## 7. Bảo mật (Security Considerations)
-
-- **Mã hóa mật khẩu:** `bcrypt` với cost factor phù hợp (ví dụ: 10-12).
-- **JWT Security:**
-  - Sử dụng secret mạnh cho JWT, quản lý qua environment variables.
-  - Access Token ngắn hạn.
-  - Refresh Token dài hạn, được lưu trữ an toàn, và **luôn được xoay vòng (rotated)** sau mỗi lần sử dụng thành công.
-- **Input Validation:** Sử dụng `t` của Elysia để validate tất cả đầu vào từ client.
-- **Drizzle ORM:** Giúp chống SQL Injection bằng cách sử dụng prepared statements.
-- **HTTPS:** Bắt buộc cho tất cả các giao tiếp.
-- **Rate Limiting:** Áp dụng cho các endpoint nhạy cảm (login, register, forgot-password) để chống brute-force.
-- **CORS:** Cấu hình CORS phù hợp trong Elysia.js.
-- **Error Handling:** Tránh lộ thông tin nhạy cảm trong thông báo lỗi.
-
----
-
-## 8. Triển khai (Deployment Strategy)
-
-- **Containerization:** Docker.
-- **Môi trường:** `development`, `staging`, `production`.
-- **CI/CD:** GitHub Actions (hoặc tương tự) để build, test, deploy.
-- **Configuration:** Sử dụng environment variables (ví dụ: `.env` files, secrets manager).
-
----
-
-## 9. Giám sát và Logging (Monitoring and Logging)
-
-- **Logging:**
-  - Sử dụng Elysia.js logger hoặc tích hợp với Pino.
-  - Log request, response, lỗi, và các sự kiện quan trọng.
-  - Định dạng log JSON để dễ dàng parse bởi các hệ thống tập trung log.
-- **Monitoring:**
-  - Theo dõi các chỉ số cơ bản: CPU, memory, disk I/O, network.
-  - Theo dõi số lượng request, tỷ lệ lỗi, độ trễ API.
-  - (Giai đoạn sau) Tích hợp với Prometheus/Grafana hoặc dịch vụ monitoring cloud.
-- **Alerting:** Thiết lập cảnh báo cho các ngưỡng lỗi hoặc hiệu năng bất thường.
-
----
-
-## 10. Quy ước Code và Cấu trúc Dự án
-
-- Tuân thủ theo `code-rule` đã được cung cấp trong `required_instructions`.
-- **Chủ động đóng góp cho Shared Packages:** Khuyến khích việc xác định và chuyển các thành phần có thể tái sử dụng (configurations, types, enums, utilities) vào các package `@repo/common` và `@repo/config` trong suốt quá trình phát triển.
-- **Ngôn ngữ:** TypeScript.
-- **Framework:** Elysia.js.
-- **ORM:** Drizzle ORM.
-- **Cấu trúc thư mục:**
-  ```
-  apps/auth-service/
-  ├── src/
-  │   ├── constants/         # Hằng số
-  │   │   ├── drizzle/       # Cấu hình Drizzle, schema, migrations
-  │   │   │   ├── 0000_initial_schema.sql
-  │   │   │   └── schema.ts
-  │   │   ├── connection.ts  # Kết nối DB
-  │   │   └── index.ts
-  │   ├── index.ts           # Entry point của Elysia app
-  │   ├── middlewares/
-  │   │   ├── auth.middleware.ts
-  │   │   └── error.middleware.ts
-  │   ├── modules/
-  │   │   └── v1/
-  │   │       ├── auth/
-  │   │       │   ├── auth.controller.ts
-  │   │       │   ├── auth.service.ts
-  │   │       │   ├── auth.validation.ts
-  │   │       │   └── auth.types.ts
-  │   │       ├── users/
-  │   │       │   ├── user.controller.ts
-  │   │       │   ├── user.service.ts
-  │   │       │   ├── user.repository.ts # Sử dụng Drizzle
-  │   │       │   └── user.types.ts
-  │   │       └── sessions/
-  │   │           ├── session.controller.ts
-  │   │           ├── session.service.ts
-  │   │           └── session.types.ts
-  │   ├── plugins/           # Elysia plugins (jwt, swagger, cookie)
-  │   ├── repositories/      # (Có thể gộp vào từng module nếu nhỏ)
-  │   │   └── base.repository.ts # (Nếu cần lớp base)
-  │   ├── types/             # Types & Enums dùng chung
-  │   │   └── index.ts
-  │   └── utils/
-  │       ├── jwt.util.ts
-  │       └── bcrypt.util.ts
-  ├── docs/
-  │   └── auth-service-design-doc.md
-  ├── .env.example
-  ├── .gitignore
-  ├── package.json
-  └── tsconfig.json
-  ```
-
----
-
-## 11. Rủi ro và Giải pháp (MVP)
-
-- **Rủi ro:** Lộ Refresh Token phía client.
-  - **Giải pháp:** Nếu là web app, sử dụng HttpOnly, Secure cookies cho Refresh Token. Với mobile, lưu trong Secure Storage. Hướng dẫn client bảo vệ token.
-- **Rủi ro:** Tấn công Brute-force vào API login.
-  - **Giải pháp:** Implement Rate Limiting dựa trên IP hoặc User ID.
-- **Rủi ro:** Quên mật khẩu (MVP) sử dụng OTP hardcoded ("111111") là không an toàn cho môi trường production.
-  - **Giải pháp (MVP):** Ghi nhận đây là giải pháp tạm thời chỉ dành cho phát triển/MVP.
-  - **Giải pháp (Sau MVP):** Ưu tiên triển khai tích hợp gửi OTP qua email thực tế càng sớm càng tốt. Cơ chế OTP hardcoded phải được loại bỏ hoàn toàn trước khi đưa vào sử dụng chính thức.
-
----
-
-## 12. Kế hoạch Phát triển (Giai đoạn Tiếp theo)
-
-- Tích hợp gửi email (xác thực tài khoản, quên mật khẩu).
-- Triển khai Xác thực Đa yếu tố (MFA).
-- Hỗ trợ Đăng nhập bằng Mạng xã hội (Google, Facebook, etc.).
-- Xây dựng trang quản trị (Admin UI) để quản lý người dùng.
-- Audit logging chi tiết.
+Tài liệu `redis-design.md` sẽ tuân thủ các quy ước đã đặt ra và bao gồm các quy tắc quản lý dữ liệu cần thiết cho việc quản lý session, refresh tokens, rate limiting, và các tính năng khác của Redis.

@@ -1,34 +1,22 @@
 import { Elysia } from "elysia";
 import { appConfig } from "./configs";
-import { closeDbConnection, getDb } from "./database/connection";
-import { errorMiddleware } from "./middlewares/error.middleware";
-import { v1Routes } from "./modules/v1";
+import { appRoutes } from "./modules";
+import { jwtPlugin } from "./plugins/jwt.plugin"; // Import JWT plugin
 import { swaggerPlugin } from "./plugins/swagger.plugin";
-
-// Khởi tạo kết nối database ngay khi khởi động app
-getDb();
+import { handleAppError } from "./utils/error-formatter.util"; // Import hàm mới
 
 // Khởi tạo ứng dụng Elysia
 const app = new Elysia()
-  .use(errorMiddleware) // Cần đặt trước để bắt lỗi từ các routes
-  .use(swaggerPlugin) // Cung cấp tài liệu Swagger
-  .use(v1Routes) // Các routes API v1
+  .onError((context) => {
+    // Sử dụng context đầy đủ
+    return handleAppError(context);
+  })
+  .use(swaggerPlugin)
+  .use(jwtPlugin) // Thêm JWT plugin vào main app
+  .use(appRoutes)
   .get("/", () => "Auth Service is running") // Route kiểm tra service hoạt động
   .listen(appConfig.SERVICE_PORT);
 
 console.log(
   `🦊 Auth Service is running at ${app.server?.hostname}:${app.server?.port}`
 );
-
-// Xử lý đóng kết nối database khi ứng dụng tắt
-process.on("SIGINT", async () => {
-  console.log("Shutting down server...");
-  await closeDbConnection();
-  process.exit(0);
-});
-
-process.on("SIGTERM", async () => {
-  console.log("Shutting down server...");
-  await closeDbConnection();
-  process.exit(0);
-});

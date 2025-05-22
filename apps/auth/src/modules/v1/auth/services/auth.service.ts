@@ -1,69 +1,56 @@
-/**
- * @file Service cho Auth module.
- * @author Your Name
- */
-import { PasswordResetOtpRepository } from "../../../../repositories/password-reset-otp.repository";
-import { RefreshTokenRepository } from "../../../../repositories/refresh-token.repository";
-import { UserRepository } from "../../../../repositories/user.repository";
-import { TokenService } from "./token.service";
 import {
-  AccountStatus,
-  AuthErrorType,
-  TokenStatus,
-} from "../../../../types/enums";
+  addDays,
+  BOOLEAN,
+  convertToMillis,
+  DeviceType,
+  HttpStatusCode,
+  MessageCode,
+  now,
+  UserStatus,
+} from "@repo/common";
+import { UserDeviceRepository } from "@repositories/user-device.repository";
+import { UserRepository } from "@repositories/user.repository";
+import { CustomError } from "src/common/errors/custom.error";
+import * as UAParser from "ua-parser-js"; // Use namespace import
+import { v4 as uuidv4 } from "uuid"; // Để tạo session_id
+import { jwtConfig } from "../../../../configs"; // Import jwtConfig để lấy expiration
+import { transaction } from "../../../../database/connection"; // Import transaction helper
+import { NewSessionSchema } from "../../../../database/schema/sessions.schema"; // Import NewSessionSchema
+import { NewUserDevice } from "../../../../database/schema/user-devices.schema";
 import {
-  LoginResult,
-  RefreshTokenResult,
-  RegisterResult,
-} from "../../../../types/interfaces";
-import {
-  comparePassword,
-  generateOtp,
-  hashOtp,
-  hashPassword,
-} from "../../../../utils/password.util";
-import {
-  createAccessTokenPayload,
-  createRefreshTokenPayload,
-  generateRandomToken,
-  generateTokenFamilyId,
-  hashToken,
-} from "../../../../utils/token.util";
-import { toSecondsFromDateTime, now } from "@repo/common";
+  signAccessToken,
+  signRefreshToken,
+} from "../../../../plugins/jwt.plugin"; // Import các JWT sign functions
+import { SessionRepository } from "../../../../repositories/session.repository"; // Import SessionRepository
+import { comparePassword, hashPassword } from "../../../../utils/password.util";
+import { UserLoginDtoType, UserRegisterDtoType } from "../dtos";
 
-import { RegisterUserSchema, LoginUserSchema } from '../validations/auth.validation';
-import type { Static } from '@sinclair/typebox';
-
-// Định nghĩa các kiểu dữ liệu đầu vào/đầu ra
-type RegisterInput = Static<typeof RegisterUserSchema>;
-type LoginInput = Static<typeof LoginUserSchema>;
-
-interface AuthResponse {
-  success: boolean;
-  message: string;
-  access_token?: string;
-  refresh_token?: string;
-  user?: {
-    id: bigint;
-    email: string;
-    full_name?: string;
-    avatar_url?: string;
-  };
-}
-
-/**
- * Service xử lý logic liên quan đến xác thực
- */
 export class AuthService {
+  // Helper function to map UA parser result to DeviceType enum
+  private mapUAParsedToDeviceType(parsedUA: UAParser.IResult): DeviceType {
+    // Use namespaced IResult
+    const deviceType = parsedUA.device.type?.toLowerCase();
+    const browserName = parsedUA.browser.name;
+
+    if (deviceType === "mobile") return DeviceType.MOBILE;
+    if (deviceType === "tablet") return DeviceType.TABLET;
+
+    if (browserName) return DeviceType.WEB_BROWSER;
+
+    if (deviceType === "desktop" || !deviceType) return DeviceType.DESKTOP;
+
+    return DeviceType.UNKNOWN;
+  }
+
   private static instance: AuthService;
   private readonly userRepo: UserRepository;
-  private readonly refreshTokenRepository: RefreshTokenRepository;
-  private readonly passwordResetOtpRepository: PasswordResetOtpRepository;
+  private readonly sessionRepo: SessionRepository; // Thêm SessionRepository
+  private readonly userDeviceRepo: UserDeviceRepository;
 
   private constructor() {
     this.userRepo = UserRepository.getInstance();
-    this.refreshTokenRepository = RefreshTokenRepository.getInstance();
-    this.passwordResetOtpRepository = PasswordResetOtpRepository.getInstance();
+    this.sessionRepo = new SessionRepository(); // Khởi tạo SessionRepository
+    this.userDeviceRepo = UserDeviceRepository.getInstance();
   }
 
   /**
@@ -77,328 +64,293 @@ export class AuthService {
     return AuthService.instance;
   }
 
-  async register(data: RegisterInput): Promise<{ id: bigint; email: string; full_name?: string }> {
+  async register(
+    data: UserRegisterDtoType,
+    ipAddress: string | null,
+    userAgent: string | null
+  ) {
     try {
-      // Kiểm tra email đã tồn tại chưa
+      // Kiểm tra email đã tồn tại chưa (nằm ngoài transaction)
       const existingUser = await this.userRepo.findByEmail(data.email);
       if (existingUser) {
-        throw new Error('EMAIL_EXISTS');
+        throw new CustomError(
+          "Email already exists",
+          HttpStatusCode.CONFLICT,
+          MessageCode.EMAIL_EXISTS
+        );
       }
 
-      // Hash mật khẩu
+      // Hash mật khẩu (nằm ngoài transaction)
       const hashedPassword = await hashPassword(data.password);
 
-      // Tạo user mới
-      const newUser = await this.userRepo.save({
-        email: data.email,
-        hashed_password: hashedPassword,
-        full_name: data.full_name,
-        account_status: AccountStatus.ACTIVE,
-      });
+      // Thực hiện transaction
+      return await transaction(async (tx) => {
+        // Tạo user mới
+        const newUser = await this.userRepo.save(
+          {
+            email: data.email,
+            hashedPassword: hashedPassword,
+            displayName: data.display_name,
+            accountStatus: UserStatus.INACTIVE,
+          },
+          tx
+        );
 
-      // Trả về kết quả
-      return {
-        id: newUser.id,
-        email: newUser.email,
-        full_name: newUser.full_name || undefined,
-      };
+        return newUser;
+      });
     } catch (error) {
-      console.error('Registration error:', error);
-      throw error;
+      // Log the error for debugging purposes
+      if (error instanceof Error) {
+        console.error("Registration error:", error.message);
+        // Check if it's a DrizzleError for unique constraint violation
+        // This is a basic check; you might need more specific error handling
+        if (
+          error?.message?.includes(
+            "duplicate key value violates unique constraint"
+          )
+        ) {
+          throw new CustomError(
+            "User with this email already exists.",
+            HttpStatusCode.CONFLICT,
+            MessageCode.EMAIL_EXISTS // Or a more specific code for DB constraint violation
+          );
+        }
+      } else {
+        console.error("Registration error (unknown type):", error);
+      }
+
+      // Throw a generic error to the client for other issues
+      throw new CustomError(
+        "Failed to register user.",
+        HttpStatusCode.INTERNAL_SERVER_ERROR,
+        MessageCode.INTERNAL_SERVER_ERROR
+      );
     }
   }
 
   async login(
-    credentials: LoginInput, 
-    signJwt: (payload: Record<string, string | number | string[] | boolean | undefined>) => Promise<string>
-  ): Promise<{ access_token: string; refresh_token: string; user: { id: bigint; email: string; full_name?: string; avatar_url?: string } }> {
+    data: UserLoginDtoType,
+    ipAddress: string | null,
+    userAgent: string | null
+  ) {
     try {
-      // Tìm user theo email
-      const user = await this.userRepo.findByEmail(credentials.email);
+      // Các kiểm tra xác thực nằm ngoài transaction
+      const user = await this.userRepo.findByEmail(data.email);
       if (!user) {
-        throw new Error(AuthErrorType.INVALID_CREDENTIALS);
-      }
-
-      // Kiểm tra trạng thái tài khoản
-      if (user.account_status !== AccountStatus.ACTIVE) {
-        throw new Error(AuthErrorType.UNAUTHORIZED);
+        throw new CustomError(
+          "Invalid email or password",
+          HttpStatusCode.UNAUTHORIZED,
+          MessageCode.AUTH_INVALID_CREDENTIALS
+        );
       }
 
       // Kiểm tra mật khẩu
-      const isPasswordValid = await comparePassword(credentials.password, user.hashed_password);
+      const isPasswordValid = await comparePassword(
+        data.password,
+        user.hashedPassword
+      );
       if (!isPasswordValid) {
-        throw new Error(AuthErrorType.INVALID_CREDENTIALS);
-      }
-
-      // Cập nhật thời gian đăng nhập cuối cùng
-      await this.userRepo.updateLastLoginTime(user.id);
-
-      // Tạo access token
-      const accessToken = await signJwt(createAccessTokenPayload(user.id));
-      
-      // Tạo refresh token
-      const { token: refreshToken, expiresAt: refreshTokenExpiresAt } = 
-        await TokenService.generateRefreshToken(user.id);
-
-      // Tạo JWT refresh token
-      const timestamp = Math.floor(refreshTokenExpiresAt.getTime() / 1000);
-      const refreshTokenPayload = createRefreshTokenPayload(
-        user.id,
-        refreshToken,
-        timestamp.toString()
-      );
-      const signedRefreshToken = await signJwt(refreshTokenPayload);
-
-      // Trả về kết quả đăng nhập
-      return {
-        access_token: accessToken,
-        refresh_token: signedRefreshToken,
-        user: {
-          id: user.id,
-          email: user.email,
-          full_name: user.full_name,
-          avatar_url: user.avatar_url,
-        },
-      };
-    } catch (error) {
-      console.error("Login error:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Refresh token
-   * @param token JWT refresh token
-   * @param verifyJwt Hàm verify JWT từ Elysia
-   * @param signJwt Hàm ký JWT từ Elysia
-   * @returns Kết quả refresh token
-   */
-  public async refreshToken(
-    token: string,
-    verifyJwt: (token: string) => Promise<Record<string, unknown> | false>,
-    signJwt: (payload: Record<string, string | number | string[] | boolean | undefined>) => Promise<string>
-  ): Promise<{ access_token: string; refresh_token: string }> {
-    try {
-      // Verify JWT refresh token
-      const decoded = await verifyJwt(token);
-      if (!decoded || typeof decoded !== 'object') {
-        throw new Error(AuthErrorType.INVALID_TOKEN);
-      }
-
-      // Lấy thông tin từ token
-      const payload = decoded as Record<string, unknown>;
-      const jti = payload.jti as string | undefined;
-      const sub = payload.sub as string | undefined;
-      const familyId = payload.familyId as string | undefined;
-
-      if (!jti || !sub || !familyId) {
-        throw new Error(AuthErrorType.INVALID_TOKEN);
-      }
-
-      // Tìm refresh token trong database
-      const tokenId = BigInt(jti);
-      const savedToken = await this.refreshTokenRepository.findById(tokenId);
-
-      // Kiểm tra token có tồn tại và còn hoạt động
-      if (!savedToken || savedToken.is_active !== TokenStatus.ACTIVE) {
-        throw new Error(AuthErrorType.INVALID_TOKEN);
-      }
-
-      // Kiểm tra user ID
-      const userId = BigInt(sub);
-      if (savedToken.user_id !== userId) {
-        throw new Error(AuthErrorType.INVALID_TOKEN);
-      }
-
-      // Kiểm tra token còn hạn sử dụng
-      const currentTime = toSecondsFromDateTime(now());
-      if (Number(savedToken.expires_at) < currentTime) {
-        throw new Error(AuthErrorType.TOKEN_EXPIRED);
-      }
-
-      // Vô hiệu hóa token cũ (Refresh Token Rotation)
-      await this.refreshTokenRepository.markAsInactive(savedToken.id);
-
-      // Tạo access token mới
-      const accessTokenPayload = createAccessTokenPayload(userId);
-      const accessToken = await signJwt(accessTokenPayload);
-
-      // Tạo refresh token mới với cùng family ID
-      const newRefreshToken = generateRandomToken();
-      const newRefreshTokenHash = hashToken(newRefreshToken);
-
-      // Thời gian hết hạn (30 ngày)
-      const expiresAt = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
-
-      // Lưu refresh token mới vào database
-      const newSavedToken = await this.refreshTokenRepository.save({
-        user_id: Number(userId),
-        token_hash: newRefreshTokenHash,
-        family_id: familyId,
-        is_active: TokenStatus.ACTIVE,
-        expires_at: expiresAt,
-      });
-
-      // Tạo JWT refresh token mới
-      const refreshTokenPayload = createRefreshTokenPayload(
-        userId,
-        newSavedToken.id.toString(),
-        familyId
-      );
-      const signedRefreshToken = await signJwt(refreshTokenPayload);
-
-      return {
-        access_token: accessToken,
-        refresh_token: signedRefreshToken,
-      };
-    } catch (error) {
-      console.error("Refresh token error:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Đăng xuất
-   * @param token JWT refresh token
-   * @param verifyJwt Hàm verify JWT từ Elysia
-   * @returns Kết quả đăng xuất
-   */
-  public async logout(
-    token: string,
-    verifyJwt: (token: string) => Promise<Record<string, unknown> | false>
-  ): Promise<void> {
-    try {
-      // Verify JWT refresh token
-      const decoded = await verifyJwt(token);
-      if (!decoded || typeof decoded !== 'object') {
-        throw new Error('INVALID_REFRESH_TOKEN');
-      }
-
-      // Lấy thông tin từ token
-      const payload = decoded as Record<string, unknown>;
-      const jti = payload.jti as string | undefined;
-
-      if (!jti) {
-        throw new Error('INVALID_REFRESH_TOKEN');
-      }
-
-      // Tìm và vô hiệu hóa token
-      const tokenId = BigInt(jti);
-      await this.refreshTokenRepository.markAsInactive(tokenId);
-
-      return;
-    } catch (error) {
-      console.error("Logout error:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Yêu cầu đặt lại mật khẩu
-   * @param email Email của tài khoản cần đặt lại mật khẩu
-   * @returns Kết quả yêu cầu
-   */
-  public async requestPasswordReset(
-    email: string
-  ): Promise<{ otp?: string }> {
-    try {
-      // Tìm user theo email
-      const user = await this.userRepo.findByEmail(email);
-      if (!user) {
-        // Không thông báo lỗi chi tiết để đảm bảo bảo mật
-        return {};
+        throw new CustomError(
+          "Invalid email or password",
+          HttpStatusCode.UNAUTHORIZED,
+          MessageCode.AUTH_INVALID_CREDENTIALS
+        );
       }
 
       // Kiểm tra trạng thái tài khoản
-      if (user.account_status !== AccountStatus.ACTIVE) {
-        return {};
+      if (user.accountStatus !== UserStatus.ACTIVE) {
+        throw new CustomError(
+          "User account is not active",
+          HttpStatusCode.FORBIDDEN,
+          MessageCode.AUTH_FORBIDDEN
+        );
       }
 
-      // Tạo OTP
-      const otp = generateOtp();
-      const otpHash = await hashOtp(otp, user.id.toString());
+      // Thực hiện transaction
+      return await transaction(async (tx) => {
+        const clientDeviceId = data.device_id;
+        const parserInstance = new UAParser.UAParser(userAgent ?? "");
+        const uaResult = parserInstance.getResult();
+        const deviceTypeEnum = this.mapUAParsedToDeviceType(uaResult);
 
-      // Thời gian hết hạn (15 phút)
-      const expiresAt = Math.floor(Date.now() / 1000) + 15 * 60;
+        let deviceName = uaResult.device.model;
+        if (!deviceName) {
+          const osName = uaResult.os.name
+            ? `${uaResult.os.name} ${uaResult.os.version ?? ""}`.trim()
+            : "";
+          const browser = uaResult.browser.name
+            ? `${uaResult.browser.name} ${uaResult.browser.version ?? ""}`.trim()
+            : "";
+          if (osName && browser) {
+            deviceName = `${osName} - ${browser}`;
+          } else if (osName) {
+            deviceName = osName;
+          } else if (browser) {
+            deviceName = browser;
+          } else {
+            deviceName = "Unknown Device";
+          }
+        }
+        deviceName = deviceName.substring(0, 100);
 
-      // Lưu OTP vào database
-      await this.passwordResetOtpRepository.save({
-        user_id: Number(user.id),
-        otp_hash: otpHash,
-        expires_at: expiresAt,
+        // Find or Create UserDevice entry
+        let userDeviceRecord = await this.userDeviceRepo.findOne(
+          {
+            userId: user.id,
+            fingerprint: clientDeviceId,
+          },
+          tx
+        );
+
+        const currentEpochMillis = convertToMillis(now());
+
+        if (!userDeviceRecord) {
+          const newUserDeviceData: NewUserDevice = {
+            userId: user.id,
+            fingerprint: clientDeviceId,
+            name: deviceName,
+            type: deviceTypeEnum,
+            model: uaResult.device.model ?? "",
+            osName: uaResult.os.name ?? "",
+            osVersion: uaResult.os.version ?? "",
+            browserName: uaResult.browser.name ?? "",
+            browserVersion: uaResult.browser.version ?? "",
+            lastKnownIp: ipAddress ?? "",
+            lastUserAgent: userAgent ?? "",
+            lastSeenAt: currentEpochMillis,
+            isTrusted: 0,
+          };
+          userDeviceRecord = await this.userDeviceRepo.save(
+            newUserDeviceData,
+            tx
+          );
+        } else {
+          userDeviceRecord = await this.userDeviceRepo.update(
+            userDeviceRecord.id,
+            {
+              name: deviceName,
+              type: deviceTypeEnum,
+              model: uaResult.device.model ?? userDeviceRecord.model ?? "",
+              osName: uaResult.os.name ?? userDeviceRecord.osName ?? "",
+              osVersion:
+                uaResult.os.version ?? userDeviceRecord.osVersion ?? "",
+              browserName:
+                uaResult.browser.name ?? userDeviceRecord.browserName ?? "",
+              browserVersion:
+                uaResult.browser.version ??
+                userDeviceRecord.browserVersion ??
+                "",
+              lastKnownIp: ipAddress ?? userDeviceRecord.lastKnownIp ?? "",
+              lastUserAgent: userAgent ?? userDeviceRecord.lastUserAgent ?? "",
+              lastSeenAt: currentEpochMillis,
+            },
+            tx
+          );
+        }
+
+        if (!userDeviceRecord || typeof userDeviceRecord.id !== "number") {
+          throw new CustomError(
+            "Failed to create or retrieve user device information.",
+            HttpStatusCode.INTERNAL_SERVER_ERROR,
+            MessageCode.INTERNAL_SERVER_ERROR
+          );
+        }
+        const userDeviceId = userDeviceRecord.id;
+
+        // Revoke existing active session
+        const existingActiveSession =
+          await this.sessionRepo.findActiveSessionByUserIdAndUserDeviceId(
+            user.id,
+            userDeviceId,
+            tx
+          );
+
+        if (existingActiveSession) {
+          await this.sessionRepo.updateSession(
+            existingActiveSession.publicSessionId,
+            {
+              isActive: BOOLEAN.FALSE,
+              revokedAt: currentEpochMillis,
+            },
+            tx
+          );
+        }
+
+        // Tạo session và tokens
+        const publicSessionId = uuidv4();
+
+        const accessTokenPayload = {
+          sub: user.id.toString(),
+          session_id: publicSessionId,
+        };
+
+        const refreshTokenPayload = {
+          sub: user.id.toString(),
+          session_id: publicSessionId,
+        };
+
+        // Ký token (nằm ngoài transaction vì không liên quan đến DB)
+        const accessToken = signAccessToken(accessTokenPayload);
+        const refreshToken = signRefreshToken(refreshTokenPayload);
+        const hashedRefreshToken = await hashPassword(refreshToken);
+
+        const refreshTokenExpString =
+          jwtConfig.JWT_REFRESH_TOKEN_EXPIRATION ?? "7d";
+        const daysMatch = refreshTokenExpString.match(/^(\d+)d$/);
+        let numberOfDaysToExpire = 7;
+        if (daysMatch && daysMatch[1]) {
+          numberOfDaysToExpire = parseInt(daysMatch[1]);
+        }
+        const expiresAtMillis = convertToMillis(
+          addDays(now(), numberOfDaysToExpire)
+        );
+
+        // Tạo session mới
+        const newSessionData: NewSessionSchema = {
+          publicSessionId: publicSessionId,
+          userId: Number(user.id),
+          userDeviceId: userDeviceId,
+          hashedRefreshToken: hashedRefreshToken,
+          familyId: uuidv4(),
+          expiresAt: expiresAtMillis,
+          isActive: 1,
+        };
+
+        const newSession = await this.sessionRepo.createSession(
+          newSessionData,
+          tx
+        );
+
+        // Cập nhật last_login_at
+        await this.userRepo.update(
+          user.id,
+          {
+            last_login_at: currentEpochMillis,
+          },
+          tx
+        );
+
+        return {
+          user_id: user.id,
+          device_id: newSession.userDeviceId,
+          session_id: newSession.publicSessionId,
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        };
       });
-
-      // Trong MVP, trả về OTP trực tiếp
-      // Trong production, gửi email với OTP
-      return { otp };
     } catch (error) {
-      console.error("Request password reset error:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Đặt lại mật khẩu
-   * @param email Email của tài khoản
-   * @param otp OTP nhận được
-   * @param newPassword Mật khẩu mới
-   * @returns Kết quả đặt lại mật khẩu
-   */
-  public async resetPassword(
-    email: string,
-    otp: string,
-    newPassword: string
-  ): Promise<void> {
-    try {
-      // Tìm user theo email
-      const user = await this.userRepo.findByEmail(email);
-      if (!user) {
-        throw new Error(AuthErrorType.USER_NOT_FOUND);
+      if (error instanceof CustomError) {
+        throw error;
       }
-
-      // Kiểm tra trạng thái tài khoản
-      if (user.account_status !== AccountStatus.ACTIVE) {
-        throw new Error(AuthErrorType.UNAUTHORIZED);
-      }
-
-      // Hash OTP để so sánh
-      const otpHash = await hashOtp(otp, user.id.toString());
-
-      // Tìm OTP theo hash và user ID
-      const savedOtp = await this.passwordResetOtpRepository.findByHashAndUser(
-        otpHash,
-        user.id
+      console.error(
+        "Login error:",
+        error instanceof Error ? error.message : error
       );
-
-      if (!savedOtp) {
-        throw new Error(AuthErrorType.INVALID_OTP);
-      }
-
-      // Hash mật khẩu mới
-      const hashedPassword = await hashPassword(newPassword);
-
-      // Cập nhật mật khẩu
-      await this.userRepo.update(user.id, {
-        hashed_password: hashedPassword,
-      });
-
-      // Đánh dấu OTP đã sử dụng
-      await this.passwordResetOtpRepository.markAsUsed(savedOtp.id);
-
-      // Vô hiệu hóa tất cả refresh token của user
-      // Để người dùng phải đăng nhập lại sau khi đổi mật khẩu
-      const tokens = await this.refreshTokenRepository.findByUserId(
-        user.id,
-        false
+      throw new CustomError(
+        "Failed to login user.",
+        HttpStatusCode.INTERNAL_SERVER_ERROR,
+        MessageCode.INTERNAL_SERVER_ERROR
       );
-      for (const token of tokens) {
-        await this.refreshTokenRepository.markAsInactive(token.id);
-      }
-
-      return;
-    } catch (error) {
-      console.error("Reset password error:", error);
-      throw error;
     }
   }
 }

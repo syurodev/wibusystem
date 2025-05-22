@@ -66,7 +66,7 @@ export interface RegisterResult {
   success: boolean;
   message: string;
   user?: {
-    id: number | bigint;
+    id: string | number;
     email: string;
     full_name?: string;
   };
@@ -81,7 +81,7 @@ export interface LoginResult {
   access_token?: string;
   refresh_token?: string;
   user?: {
-    id: number | bigint;
+    id: string | number;
     email: string;
     full_name?: string;
     avatar_url?: string;

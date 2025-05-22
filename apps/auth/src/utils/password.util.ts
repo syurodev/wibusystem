@@ -1,24 +1,13 @@
 /**
- * @file Các hàm tiện ích xử lý password (bcrypt).
- * @author Your Name
- */
-
-/**
- * Các hàm tiện ích cho việc mã hóa và xác minh mật khẩu sử dụng bcrypt
- */
-
-/**
  * Mã hóa mật khẩu sử dụng bcrypt
  * @param password Mật khẩu cần hash
  * @param rounds Số vòng bcrypt (độ khó)
  * @returns Mật khẩu đã được hash
  */
-export const hashPassword = async (
-  password: string,
-  rounds: number = 10
-): Promise<string> => {
-  const bcrypt = require("bcrypt");
-  return await bcrypt.hash(password, rounds);
+export const hashPassword = async (password: string): Promise<string> => {
+  // Bun.password.hash mặc định sử dụng Argon2id.
+  // Các tham số như timeCost, memoryCost, parallelism sẽ sử dụng giá trị mặc định của Bun.
+  return await Bun.password.hash(password);
 };
 
 /**
@@ -31,8 +20,8 @@ export const comparePassword = async (
   password: string,
   hashedPassword: string
 ): Promise<boolean> => {
-  const bcrypt = require("bcrypt");
-  return await bcrypt.compare(password, hashedPassword);
+  // Bun.password.verify tự động phát hiện thuật toán của hash
+  return await Bun.password.verify(password, hashedPassword);
 };
 
 /**
@@ -61,5 +50,3 @@ export const hashOtp = async (otp: string, salt: string): Promise<string> => {
   const crypto = require("crypto");
   return crypto.createHmac("sha256", salt).update(otp).digest("hex");
 };
-
-// TODO: Cân nhắc cài đặt 'bcrypt' và sử dụng SALT_ROUNDS từ config.

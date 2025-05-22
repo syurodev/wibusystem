@@ -1,10 +1,9 @@
 import { and, eq, SQL } from "drizzle-orm";
-import { getDb } from "../database/connection";
+import { db } from "../database/connection"; // Sử dụng instance db duy nhất
 
-// Định nghĩa kiểu Transaction tự tạo, tương thích với DB Client
-type DrizzleTransaction = Parameters<
-  Parameters<ReturnType<typeof getDb>["transaction"]>[0]
->[0];
+// Định nghĩa kiểu Transaction phù hợp với Drizzle ORM (PostgreSQL)
+// Có thể mở rộng nếu cần transaction nâng cao
+export type DrizzleTransaction = typeof db;
 
 /**
  * BaseRepository - Lớp cơ sở cho tất cả các repositories
@@ -12,11 +11,9 @@ type DrizzleTransaction = Parameters<
  * @template InsertType - Kiểu dữ liệu khi thêm mới vào database
  */
 export abstract class BaseRepository<TTable extends object, InsertType> {
-  protected readonly db: ReturnType<typeof getDb>;
   protected readonly table: TTable;
 
   constructor(table: TTable) {
-    this.db = getDb();
     this.table = table;
   }
 
@@ -32,7 +29,7 @@ export abstract class BaseRepository<TTable extends object, InsertType> {
   ) {
     try {
       // Lựa chọn DB hoặc transaction
-      const queryRunner = tx || this.db;
+      const queryRunner = tx || db;
 
       // Tạo mảng các điều kiện WHERE
       const whereConditions: SQL<unknown>[] = [];
@@ -94,10 +91,10 @@ export abstract class BaseRepository<TTable extends object, InsertType> {
    * @param tx Transaction tùy chọn
    * @returns Bản ghi được tìm thấy hoặc undefined nếu không tìm thấy
    */
-  public async findById(id: bigint, tx?: DrizzleTransaction) {
+  public async findById(id: number, tx?: DrizzleTransaction) {
     try {
       // Lựa chọn DB hoặc transaction
-      const queryRunner = tx || this.db;
+      const queryRunner = tx || db;
 
       // Giả định rằng mọi bảng đều có cột 'id'
       const result = await queryRunner
@@ -120,13 +117,13 @@ export abstract class BaseRepository<TTable extends object, InsertType> {
   public async save(data: InsertType, tx?: DrizzleTransaction) {
     try {
       // Lựa chọn DB hoặc transaction
-      const queryRunner = tx || this.db;
+      const queryRunner = tx || db;
 
       const result = await queryRunner
         .insert(this.table as any)
         .values(data as any)
         .returning();
-      return result[0];
+      return Array.isArray(result) ? result[0] : result;
     } catch (error) {
       console.error(`Error saving record:`, error);
       throw error;
@@ -141,13 +138,13 @@ export abstract class BaseRepository<TTable extends object, InsertType> {
    * @returns Bản ghi đã được cập nhật
    */
   public async update<UpdateType>(
-    id: bigint,
+    id: number,
     data: UpdateType,
     tx?: DrizzleTransaction
   ) {
     try {
       // Lựa chọn DB hoặc transaction
-      const queryRunner = tx || this.db;
+      const queryRunner = tx || db;
 
       const result = await queryRunner
         .update(this.table as any)
@@ -167,16 +164,16 @@ export abstract class BaseRepository<TTable extends object, InsertType> {
    * @param tx Transaction tùy chọn
    * @returns Bản ghi đã bị xóa
    */
-  public async delete(id: bigint, tx?: DrizzleTransaction) {
+  public async delete(id: number, tx?: DrizzleTransaction) {
     try {
       // Lựa chọn DB hoặc transaction
-      const queryRunner = tx || this.db;
+      const queryRunner = tx || db;
 
       const result = await queryRunner
         .delete(this.table as any)
         .where(eq((this.table as any).id, id))
         .returning();
-      return result[0];
+      return Array.isArray(result) ? result[0] : result;
     } catch (error) {
       console.error(`Error deleting record:`, error);
       throw error;

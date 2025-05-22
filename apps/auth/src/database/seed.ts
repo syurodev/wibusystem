@@ -1,10 +1,7 @@
+import { Pool } from "pg"; // Thêm import Pool
 import { dbUserConfig } from "../configs";
-import { closeDbConnection, getDb } from "./connection";
-import {
-  permissionsTable,
-  rolePermissionsTable,
-  rolesTable,
-} from "./schema/index"; // Adjusted import
+import { db } from "./connection"; // Thay thế getDb và closeDbConnection bằng db
+import { permissions, rolePermissions, roles } from "./schema/index"; // Adjusted import
 
 // --- Data Definitions based on role-permission.md ---
 
@@ -249,40 +246,38 @@ const rolePermissionMapping: Record<string, string[]> = {
 
 async function seedDatabase() {
   console.log("Starting database seeding for roles and permissions...");
-  const db = getDb();
 
   // 1. Seed Permissions
   console.log("Seeding permissions...");
-  await db
-    .insert(permissionsTable)
-    .values(permissionsData)
-    .onConflictDoNothing();
+  await db.insert(permissions).values(permissionsData).onConflictDoNothing();
 
   // Fetch all permissions to ensure we have them for mapping.
   const allDbPermissions = await db
-    .select({ id: permissionsTable.id, name: permissionsTable.name })
-    .from(permissionsTable);
+    .select({ id: permissions.id, name: permissions.name })
+    .from(permissions);
   const permissionNameToId = new Map(
-    allDbPermissions.map((p) => [p.name, p.id])
+    allDbPermissions.map((p: { name: string; id: number }) => [p.name, p.id])
   );
   console.log(`Upserted/found ${allDbPermissions.length} permissions.`);
 
   // 2. Seed Roles
   console.log("Seeding roles...");
-  await db.insert(rolesTable).values(rolesData).onConflictDoNothing();
+  await db.insert(roles).values(rolesData).onConflictDoNothing();
 
   // Fetch all roles
   const allDbRoles = await db
-    .select({ id: rolesTable.id, name: rolesTable.name })
-    .from(rolesTable);
-  const roleNameToId = new Map(allDbRoles.map((r) => [r.name, r.id]));
+    .select({ id: roles.id, name: roles.name })
+    .from(roles);
+  const roleNameToId = new Map(
+    allDbRoles.map((r: { name: string; id: number }) => [r.name, r.id])
+  );
   console.log(`Upserted/found ${allDbRoles.length} roles.`);
 
   // 3. Seed Role-Permission Mappings
   console.log("Seeding role-permission mappings...");
   const rolePermissionValues: Array<{
-    role_id: number;
-    permission_id: number;
+    roleId: number;
+    permissionId: number;
   }> = [];
 
   for (const roleName in rolePermissionMapping) {
@@ -295,24 +290,30 @@ async function seedDatabase() {
     }
 
     const permissionNamesForRole = rolePermissionMapping[roleName];
-    for (const pName of permissionNamesForRole) {
-      const permissionId = permissionNameToId.get(pName);
-      if (!permissionId) {
-        console.warn(
-          `Permission name "${pName}" for role "${roleName}" not found. Skipping.`
-        );
-        continue;
+    if (permissionNamesForRole && Array.isArray(permissionNamesForRole)) {
+      for (const pName of permissionNamesForRole) {
+        const permissionId = permissionNameToId.get(pName);
+        if (!permissionId) {
+          console.warn(
+            `Permission name "${pName}" for role "${roleName}" not found. Skipping.`
+          );
+          continue;
+        }
+        rolePermissionValues.push({
+          roleId,
+          permissionId,
+        });
       }
-      rolePermissionValues.push({
-        role_id: roleId,
-        permission_id: permissionId,
-      });
+    } else {
+      console.warn(
+        `No permissions defined or invalid format for role "${roleName}".`
+      );
     }
   }
 
   if (rolePermissionValues.length > 0) {
     await db
-      .insert(rolePermissionsTable)
+      .insert(rolePermissions)
       .values(rolePermissionValues)
       .onConflictDoNothing();
     console.log(
@@ -323,6 +324,21 @@ async function seedDatabase() {
   }
 
   console.log("Database seeding completed.");
+}
+
+// Hàm để đóng kết nối database
+async function closeDbConnection() {
+  // Lấy pool từ drizzle instance (nếu cần)
+  // Lưu ý: cần thêm cách truy cập pool từ db nếu cần
+  console.log("Closing database connection...");
+  try {
+    if ((db as any)._client instanceof Pool) {
+      await (db as any)._client.end();
+      console.log("Database connection closed successfully.");
+    }
+  } catch (error) {
+    console.error("Error closing database connection:", error);
+  }
 }
 
 async function main() {

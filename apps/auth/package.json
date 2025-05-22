@@ -36,7 +36,7 @@
     "@types/pg": "^8.15.1",
     "@types/ua-parser-js": "^0.7.39",
     "@types/uuid": "^10.0.0",
-    "bun-types": "latest",
+    "bun-types": "^1.2.14",
     "drizzle-kit": "^0.31.1",
     "eslint": "^8.57.0",
     "tsx": "^4.19.4",

@@ -1,4 +1,4 @@
-import { convertToMillis, now } from "@repo/common";
+import { BOOLEAN, convertToMillis, now } from "@repo/common";
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "src/database/connection";
 import {
@@ -98,6 +98,59 @@ export class SessionRepository extends BaseRepository<
       .from(this.table)
       .where(eq(this.table.hashedRefreshToken, hashedRefreshToken));
     return results[0];
+  }
+  
+  /**
+   * Vô hiệu hóa một phiên cụ thể
+   * @param sessionId ID của phiên cần vô hiệu hóa
+   * @param tx Transaction để thực hiện trong
+   * @returns Kết quả cập nhật
+   */
+  async invalidateSession(
+    sessionId: string,
+    tx?: DrizzleTransaction
+  ): Promise<void> {
+    const queryRunner = tx || db;
+    await queryRunner
+      .update(this.table)
+      .set({ isActive: BOOLEAN.FALSE, updatedAt: convertToMillis(now()) })
+      .where(eq(this.table.publicSessionId, sessionId));
+  }
+  
+  /**
+   * Vô hiệu hóa tất cả phiên của một người dùng
+   * @param userId ID của người dùng
+   * @param tx Transaction để thực hiện trong
+   * @returns Kết quả cập nhật
+   */
+  async invalidateAllSessionsByUserId(
+    userId: number,
+    tx?: DrizzleTransaction
+  ): Promise<void> {
+    const queryRunner = tx || db;
+    await queryRunner
+      .update(this.table)
+      .set({ isActive: BOOLEAN.FALSE, updatedAt: convertToMillis(now()) })
+      .where(eq(this.table.userId, userId));
+  }
+  
+  /**
+   * Đếm số phiên đăng nhập của một người dùng
+   * @param userId ID của người dùng
+   * @param tx Transaction để thực hiện trong
+   * @returns Số phiên đăng nhập
+   */
+  async countSessionsByUserId(
+    userId: number,
+    tx?: DrizzleTransaction
+  ): Promise<number> {
+    const queryRunner = tx || db;
+    const result = await queryRunner
+      .select({ count: sql<number>`count(*)` })
+      .from(this.table)
+      .where(eq(this.table.userId, userId));
+    
+    return result[0]?.count || 0;
   }
 
   async updateSession(

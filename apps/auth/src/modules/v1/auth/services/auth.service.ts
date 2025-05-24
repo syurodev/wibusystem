@@ -8,6 +8,7 @@ import {
   now,
   Role,
   UserStatus,
+  addMinutes,
 } from "@repo/common";
 import { UserDeviceRepository } from "@repositories/user-device.repository";
 import { UserRepository } from "@repositories/user.repository";
@@ -29,6 +30,9 @@ import { SessionRepository } from "../../../../repositories/session.repository";
 import { UserRolesRepository } from "../../../../repositories/user-roles.repository";
 import { comparePassword, hashPassword } from "../../../../utils/password.util";
 import { getRedisClient } from "../../../../utils/redis.util"; // Import Redis client
+import { ForgotPasswordDtoType, LogoutDtoType, RefreshTokenDtoType, ResetPasswordDtoType } from "../dtos";
+import { verifyRefreshToken } from "../../../../plugins/jwt.plugin";
+import { sendEmail, createPasswordResetEmailTemplate } from "../../../../utils/email.util";
 import { UserLoginDtoType, UserRegisterDtoType } from "../dtos";
 
 export class AuthService {
@@ -49,14 +53,23 @@ export class AuthService {
   }
 
   private static instance: AuthService;
-  private readonly userRepo: UserRepository;
-  private readonly sessionRepo: SessionRepository; // Thêm SessionRepository
-  private readonly userDeviceRepo: UserDeviceRepository;
+  private userRepo: UserRepository;
+  private userDeviceRepo: UserDeviceRepository;
+  private roleRepo: RoleRepository;
+  private userRolesRepo: UserRolesRepository;
+  private permissionRepo: PermissionRepository;
+  private sessionRepo: SessionRepository;
+  
+  // Redis key TTL cho token reset mật khẩu (30 phút)
+  private readonly RESET_TOKEN_TTL = 30 * 60;
 
   private constructor() {
     this.userRepo = UserRepository.getInstance();
     this.sessionRepo = new SessionRepository(); // Khởi tạo SessionRepository
     this.userDeviceRepo = UserDeviceRepository.getInstance();
+    this.roleRepo = RoleRepository.getInstance();
+    this.userRolesRepo = UserRolesRepository.getInstance();
+    this.permissionRepo = PermissionRepository.getInstance();
   }
 
   /**
@@ -611,6 +624,483 @@ export class AuthService {
       );
       throw new CustomError(
         "Failed to login user.",
+        HttpStatusCode.INTERNAL_SERVER_ERROR,
+        MessageCode.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
+   * Tạo mới access token và refresh token và cập nhật phiên
+   * @param userId ID người dùng
+   * @param userDeviceId ID thiết bị
+   * @param user Thông tin người dùng
+   * @param tx Transaction để thực hiện trong
+   * @returns Thông tin token và phiên
+   */
+  private async createTokensWithSession(
+    userId: number,
+    userDeviceId: number,
+    user: User,
+    tx: any
+  ) {
+    // Tạo session ID mới
+    const publicSessionId = uuidv4();
+    
+    // Tạo access token
+    const accessToken = signAccessToken({
+      sub: userId.toString(),
+      email: user.email,
+      name: user.displayName || user.email,
+      session_id: publicSessionId,
+      device_id: userDeviceId.toString(),
+    });
+    
+    // Tạo refresh token
+    const refreshToken = signRefreshToken({
+      sub: userId.toString(),
+      session_id: publicSessionId,
+      device_id: userDeviceId.toString(),
+    });
+    
+    // Hash refresh token để lưu trữ an toàn
+    const hashedRefreshToken = await hashPassword(refreshToken);
+    
+    // Lưu session mới vào database
+    const refreshTokenExpireDays = parseInt(jwtConfig.JWT_REFRESH_TOKEN_EXPIRATION || "7");
+const expiresAt = addDays(now(), refreshTokenExpireDays).valueOf();
+    
+    const sessionData: NewSessionSchema = {
+      userId,
+      userDeviceId,
+      publicSessionId,
+      hashedRefreshToken,
+      expiresAt,
+      isActive: BOOLEAN.TRUE,
+      createdAt: convertToMillis(now()),
+      updatedAt: convertToMillis(now()),
+    };
+    
+    await this.sessionRepo.createSession(sessionData, tx);
+    
+    // Cache thông tin session
+    try {
+      const redisClient = getRedisClient();
+      const sessionKey = `auth:session:${publicSessionId}`;
+      const userSessionsKey = `auth:user:${userId}:sessions`;
+      
+      await redisClient.set(sessionKey, JSON.stringify({
+        userId,
+        userDeviceId,
+        expiresAt,
+        isActive: true,
+      }));
+      
+      const refreshTokenExpireDays = parseInt(jwtConfig.JWT_REFRESH_TOKEN_EXPIRATION || "7");
+      await redisClient.expire(sessionKey, refreshTokenExpireDays * 24 * 60 * 60);
+      await redisClient.sAdd(userSessionsKey, publicSessionId);
+    } catch (redisError) {
+      console.error("Redis error when creating session:", redisError);
+      // Không throw lỗi ở đây, tiếp tục xử lý
+    }
+    
+    return {
+      accessToken,
+      refreshToken,
+      publicSessionId,
+    };
+  }
+  
+  /**
+   * Làm mới access token sử dụng refresh token
+   * @param body Thông tin refresh token
+   * @param ipAddress Địa chỉ IP của người dùng
+   * @param userAgent Chuỗi User-Agent của trình duyệt/thiết bị
+   * @returns Token mới
+   */
+  public async refreshToken(body: RefreshTokenDtoType, ipAddress: string | null, userAgent: string | null) {
+    const refreshToken = body.refresh_token;
+    
+    try {
+      // Xác thực refresh token
+      const payload = verifyRefreshToken(refreshToken);
+      
+      if (!payload || !payload.sub || !payload.session_id) {
+        throw new CustomError(
+          "Invalid refresh token",
+          HttpStatusCode.UNAUTHORIZED,
+          MessageCode.AUTH_REFRESH_TOKEN_INVALID_OR_EXPIRED
+        );
+      }
+      
+      const userId = Number(payload.sub);
+      const sessionId = payload.session_id;
+      
+      // Kiểm tra session có tồn tại và còn hoạt động
+      const session = await this.sessionRepo.findSessionById(sessionId);
+      
+      if (!session || !session.isActive || session.userId !== userId) {
+        throw new CustomError(
+          "Invalid session",
+          HttpStatusCode.UNAUTHORIZED,
+          MessageCode.AUTH_REFRESH_TOKEN_NOT_FOUND
+        );
+      }
+      
+      // So sánh hash của refresh token
+      const isValidToken = await comparePassword(refreshToken, session.hashedRefreshToken);
+      
+      if (!isValidToken) {
+        // Nếu token không hợp lệ, đánh dấu session đó không còn hoạt động
+        await this.sessionRepo.invalidateSession(sessionId);
+        
+        throw new CustomError(
+          "Invalid refresh token",
+          HttpStatusCode.UNAUTHORIZED,
+          MessageCode.AUTH_REFRESH_TOKEN_INVALID_OR_EXPIRED
+        );
+      }
+      
+      // Lấy thông tin user
+      const user = await this.userRepo.findById(userId);
+      
+      if (!user) {
+        throw new CustomError(
+          "User not found",
+          HttpStatusCode.NOT_FOUND,
+          MessageCode.USER_NOT_FOUND
+        );
+      }
+      
+      // Kiểm tra trạng thái tài khoản
+      if (user.accountStatus !== UserStatus.ACTIVE) {
+        throw new CustomError(
+          "User account is not active",
+          HttpStatusCode.FORBIDDEN,
+          MessageCode.AUTH_FORBIDDEN
+        );
+      }
+      
+      // Lấy thông tin thiết bị
+      const deviceInfo = await this.userDeviceRepo.findById(session.userDeviceId);
+      
+      if (!deviceInfo) {
+        throw new CustomError(
+          "Device not found",
+          HttpStatusCode.NOT_FOUND,
+          MessageCode.RESOURCE_NOT_FOUND
+        );
+      }
+      
+      // Cập nhật IP và User-Agent nếu có thay đổi
+      if (ipAddress || userAgent) {
+        await this.userDeviceRepo.update(
+          deviceInfo.id,
+          {
+            ip_address: ipAddress || deviceInfo.ipAddress,
+            user_agent: userAgent || deviceInfo.userAgent,
+            last_used_at: convertToMillis(now()),
+          }
+        );
+      }
+      
+      // Tạo token mới
+      let result;
+      await transaction(async (tx) => {
+        // Tạo tokens mới
+        // Đảm bảo user có đủ các trường cần thiết
+        const userForToken = {
+          id: user.id,
+          email: user.email,
+          displayName: user.displayName || null,
+          hashedPassword: user.hashedPassword,
+          accountStatus: user.accountStatus,
+          username: user.username || null,
+          avatarUrl: user.avatarUrl || null,
+          coverUrl: user.coverUrl || null,
+          lastLoginAt: user.lastLoginAt || null,
+          emailVerifiedAt: user.emailVerifiedAt || null,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt,
+          deletedAt: user.deletedAt || null
+        };
+        
+        const tokenInfo = await this.createTokensWithSession(
+          userId,
+          session.userDeviceId,
+          userForToken,
+          tx
+        );
+        
+        result = {
+          accessToken: tokenInfo.accessToken,
+          refreshToken: tokenInfo.refreshToken,
+          user: {
+            id: user.id,
+            email: user.email,
+            displayName: user.displayName,
+          },
+          sessionId: tokenInfo.publicSessionId,
+        };
+      });
+      
+      return result;
+    } catch (error) {
+      if (error instanceof CustomError) {
+        throw error;
+      }
+      
+      // Log thông tin lỗi
+      console.error("Refresh token error:", error);
+      
+      throw new CustomError(
+        "Error refreshing token",
+        HttpStatusCode.INTERNAL_SERVER_ERROR,
+        MessageCode.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+  /**
+   * Đăng xuất người dùng khỏi phiên hiện tại hoặc tất cả các phiên
+   * @param userId ID của người dùng đang đăng xuất
+   * @param sessionId ID của phiên hiện tại
+   * @param body Thông tin đăng xuất (có thể chọn đăng xuất khỏi tất cả thiết bị)
+   * @returns Kết quả đăng xuất
+   */
+  public async logout(userId: number, sessionId: string, body: LogoutDtoType) {
+    try {
+      const logoutAllDevices = body.all_devices === true;
+      
+      if (logoutAllDevices) {
+        // Đăng xuất khỏi tất cả các thiết bị
+        await this.sessionRepo.invalidateAllSessionsByUserId(userId);
+        
+        // Xóa tất cả session của user trong Redis
+        const redisClient = getRedisClient();
+        const userSessionsKey = `auth:user:${userId}:sessions`;
+        
+        try {
+          // Lấy danh sách tất cả session của user
+          const sessions = await redisClient.sMembers(userSessionsKey);
+          
+          if (sessions.length > 0) {
+            // Xóa từng session khỏi Redis
+            for (const session of sessions) {
+              await redisClient.del(`auth:session:${session}`);
+            }
+            
+            // Xóa set chứa danh sách session
+            await redisClient.del(userSessionsKey);
+          }
+        } catch (redisError) {
+          console.error("Redis error when logging out all devices:", redisError);
+          // Không throw lỗi ở đây, tiếp tục xử lý
+        }
+        
+        return {
+          message: "Logged out from all devices successfully",
+          loggedOutCount: await this.sessionRepo.countSessionsByUserId(userId),
+        };
+      } else {
+        // Đăng xuất khỏi phiên hiện tại
+        await this.sessionRepo.invalidateSession(sessionId);
+        
+        // Xóa session khỏi Redis
+        try {
+          const redisClient = getRedisClient();
+          const sessionKey = `auth:session:${sessionId}`;
+          const userSessionsKey = `auth:user:${userId}:sessions`;
+          
+          await redisClient.del(sessionKey);
+          await redisClient.sRem(userSessionsKey, sessionId);
+        } catch (redisError) {
+          console.error("Redis error when logging out:", redisError);
+          // Không throw lỗi ở đây, tiếp tục xử lý
+        }
+        
+        return {
+          message: "Logged out successfully",
+          sessionId,
+        };
+      }
+    } catch (error) {
+      if (error instanceof CustomError) {
+        throw error;
+      }
+      
+      console.error("Logout error:", error);
+      
+      throw new CustomError(
+        "Error during logout",
+        HttpStatusCode.INTERNAL_SERVER_ERROR,
+        MessageCode.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+  /**
+   * Xử lý yêu cầu quên mật khẩu
+   * @param body Thông tin yêu cầu
+   * @returns Kết quả xử lý
+   */
+  public async forgotPassword(body: ForgotPasswordDtoType) {
+    const { email } = body;
+    
+    try {
+      // Tìm user theo email
+      const user = await this.userRepo.findByEmail(email);
+      
+      if (!user) {
+        // Không trả về lỗi để tránh leak thông tin về việc email có tồn tại hay không
+        return {
+          message: "Password reset instructions sent to email if account exists",
+        };
+      }
+      
+      // Kiểm tra trạng thái tài khoản
+      if (user.accountStatus !== UserStatus.ACTIVE) {
+        return {
+          message: "Password reset instructions sent to email if account exists",
+        };
+      }
+      
+      // Tạo token reset mật khẩu (dùng uuid đơn giản)
+      const resetToken = uuidv4();
+      
+      // Lưu token vào Redis với thời gian hết hạn 30 phút
+      const redisClient = getRedisClient();
+      const resetTokenKey = `auth:reset_token:${resetToken}`;
+      
+      await redisClient.set(resetTokenKey, user.id.toString());
+      await redisClient.expire(resetTokenKey, this.RESET_TOKEN_TTL);
+      
+      // Gửi email với token
+      const emailSent = await sendEmail({
+        to: user.email,
+        subject: "Đặt lại mật khẩu của bạn",
+        html: createPasswordResetEmailTemplate(resetToken, user.displayName || user.email),
+      });
+      
+      if (!emailSent) {
+        throw new CustomError(
+          "Failed to send password reset email",
+          HttpStatusCode.INTERNAL_SERVER_ERROR,
+          MessageCode.INTERNAL_SERVER_ERROR
+        );
+      }
+      
+      return {
+        message: "Password reset instructions sent to email if account exists",
+      };
+    } catch (error) {
+      if (error instanceof CustomError) {
+        throw error;
+      }
+      
+      console.error("Forgot password error:", error);
+      
+      throw new CustomError(
+        "Error processing forgot password request",
+        HttpStatusCode.INTERNAL_SERVER_ERROR,
+        MessageCode.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+  /**
+   * Đặt lại mật khẩu mới
+   * @param body Thông tin đặt lại mật khẩu
+   * @returns Kết quả đặt lại mật khẩu
+   */
+  public async resetPassword(body: ResetPasswordDtoType) {
+    const { token, password, password_confirmation } = body;
+    
+    try {
+      // Kiểm tra mật khẩu và xác nhận mật khẩu
+      if (password !== password_confirmation) {
+        throw new CustomError(
+          "Password confirmation does not match",
+          HttpStatusCode.BAD_REQUEST,
+          MessageCode.VALIDATION_ERROR
+        );
+      }
+      
+      // Kiểm tra token reset mật khẩu trong Redis
+      const redisClient = getRedisClient();
+      const resetTokenKey = `auth:reset_token:${token}`;
+      const userId = await redisClient.get(resetTokenKey);
+      
+      if (!userId) {
+        throw new CustomError(
+          "Invalid or expired reset token",
+          HttpStatusCode.BAD_REQUEST,
+          MessageCode.VALIDATION_ERROR
+        );
+      }
+      
+      // Lấy thông tin user
+      const user = await this.userRepo.findById(Number(userId));
+      
+      if (!user) {
+        throw new CustomError(
+          "User not found",
+          HttpStatusCode.NOT_FOUND,
+          MessageCode.USER_NOT_FOUND
+        );
+      }
+      
+      // Kiểm tra trạng thái tài khoản
+      if (user.accountStatus !== UserStatus.ACTIVE) {
+        throw new CustomError(
+          "User account is not active",
+          HttpStatusCode.FORBIDDEN,
+          MessageCode.AUTH_FORBIDDEN
+        );
+      }
+      
+      // Hash mật khẩu mới
+      const hashedPassword = await hashPassword(password);
+      
+      // Cập nhật mật khẩu
+      await this.userRepo.update(user.id, { password: hashedPassword });
+      
+      // Vô hiệu hóa tất cả các phiên hiện tại
+      await this.sessionRepo.invalidateAllSessionsByUserId(user.id);
+      
+      // Xóa token reset
+      await redisClient.del(resetTokenKey);
+      
+      // Xóa tất cả session của user trong Redis
+      try {
+        const userSessionsKey = `auth:user:${user.id}:sessions`;
+        
+        // Lấy danh sách tất cả session của user
+        const sessions = await redisClient.sMembers(userSessionsKey);
+        
+        if (sessions.length > 0) {
+          // Xóa từng session khỏi Redis
+          for (const session of sessions) {
+            await redisClient.del(`auth:session:${session}`);
+          }
+          
+          // Xóa set chứa danh sách session
+          await redisClient.del(userSessionsKey);
+        }
+      } catch (redisError) {
+        console.error("Redis error when resetting password:", redisError);
+        // Không throw lỗi ở đây, tiếp tục xử lý
+      }
+      
+      return {
+        message: "Password has been reset successfully. Please login with your new password.",
+      };
+    } catch (error) {
+      if (error instanceof CustomError) {
+        throw error;
+      }
+      
+      console.error("Reset password error:", error);
+      
+      throw new CustomError(
+        "Error resetting password",
         HttpStatusCode.INTERNAL_SERVER_ERROR,
         MessageCode.INTERNAL_SERVER_ERROR
       );

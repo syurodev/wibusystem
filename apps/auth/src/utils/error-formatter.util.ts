@@ -55,17 +55,36 @@ export function handleAppError(context: ErrorHandlerContext) {
     (MessageCode as any).INTERNAL_SERVER_ERROR;
   let responseErrorDetails: ErrorDetail[] | undefined = undefined;
 
+  // Log chi tiết về lỗi để giúp debug
+  console.error(`[Error Handler] Code: ${stringCode}, Error:`, error);
+  if (error instanceof Error) {
+    console.error(`Stack trace:`, error.stack);
+  }
+
   if (error instanceof CustomError) {
     responseStatusCode = error.statusCode;
     responseMessageCode = error.messageCode;
     responseMessage = error.message;
-    responseErrorDetails = [{ field: "email", message: error.message }]; // Hoặc trường cụ thể nếu có
-  } else if (error instanceof CustomError) {
-    // Xử lý AuthenticationError
-    responseStatusCode = error.statusCode;
-    responseMessageCode = error.messageCode;
-    responseMessage = error.message;
-    // Có thể thêm errorDetails nếu cần, ví dụ field nào gây lỗi
+
+    // Xác định trường lỗi dựa trên messageCode
+    let errorField = "general";
+    if (error.messageCode === MessageCode.EMAIL_EXISTS) {
+      errorField = "email";
+    } else if (error.messageCode === MessageCode.INVALID_PASSWORD) {
+      errorField = "password";
+    } else if (
+      error.messageCode === MessageCode.AUTH_USER_NOT_FOUND ||
+      error.messageCode === MessageCode.USER_NOT_FOUND
+    ) {
+      errorField = "email";
+    }
+
+    responseErrorDetails = [
+      {
+        field: errorField,
+        message: error.message,
+      },
+    ];
   } else if (stringCode === "VALIDATION") {
     const validationError = error as ValidationError;
     responseStatusCode = HttpStatusCode.BAD_REQUEST;
@@ -95,7 +114,7 @@ export function handleAppError(context: ErrorHandlerContext) {
       mapElysiaCodeToMessageCode(stringCode) ?? responseMessageCode;
   } else if (error instanceof Error) {
     responseMessage = error.message;
-    const customStatus = (error as any).status || (error as any).statusCode;
+    const customStatus = (error as any).status ?? (error as any).statusCode;
     if (
       typeof customStatus === "number" &&
       customStatus >= 100 &&
@@ -110,7 +129,7 @@ export function handleAppError(context: ErrorHandlerContext) {
       responseMessageCode;
     responseErrorDetails = [
       {
-        field: error.name || "general",
+        field: error.name ?? "general",
         message: error.message,
       },
     ];

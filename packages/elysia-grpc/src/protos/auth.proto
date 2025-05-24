@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package com.wibu.auth;
+
+option go_package = "github.com/wibusystem/system/proto/auth_service;auth_service";
+
+// The authentication service definition.
+service AuthService {
+  // Validates a token and returns user information
+  rpc ValidateToken (ValidateTokenRequest) returns (ValidateTokenResponse);
+}
+
+// The request message containing the token.
+message ValidateTokenRequest {
+  string token = 1;
+}
+
+// The response message containing user information or an error.
+message ValidateTokenResponse {
+  string userId = 1;
+  string email = 2;
+  bool isValid = 3;
+  string error = 4; // Empty if token is valid
+  repeated string roles = 5;
+  repeated string permissions = 6;
+  string sessionId = 7;
+  string deviceId = 8;
+}

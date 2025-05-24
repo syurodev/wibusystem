@@ -22,5 +22,7 @@ export const jwtConfig = {
 
 export const appConfig = {
   SERVICE_PORT: parseInt(process.env.SERVICE_PORT ?? "3000"),
-  GRPC_PORT: parseInt(process.env.GRPC_PORT ?? "50051"),
+  GRPC_PORT: parseInt(
+    process.env.AUTH_SERVICE_GRPC_PORT ?? process.env.GRPC_PORT ?? "50051"
+  ),
 };

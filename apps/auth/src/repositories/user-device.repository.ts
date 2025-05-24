@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { convertToMillis, now } from "@repo/common";
 import { db } from "../database/connection";
 import {
   NewUserDevice,
@@ -36,8 +36,8 @@ export class UserDeviceRepository extends BaseRepository<
     data: NewUserDevice,
     tx?: DrizzleTransaction
   ): Promise<UserDevice | null> {
-    const nowEpoch = sql`extract(epoch from now())`;
-    const queryRunner = tx || db;
+    const nowEpoch = convertToMillis(now());
+    const queryRunner = tx ?? db;
 
     try {
       const result = await queryRunner
@@ -53,8 +53,7 @@ export class UserDeviceRepository extends BaseRepository<
           osVersion: data.osVersion,
           browserName: data.browserName,
           browserVersion: data.browserVersion,
-          isTrusted:
-            data.isTrusted !== undefined ? (data.isTrusted ? 1 : 0) : 0,
+          isTrusted: data.isTrusted,
           name: data.name,
           lastSeenAt: nowEpoch, // Cập nhật lastSeenAt khi upsert
           // createdAt sẽ tự động được set bởi DB default nếu là insert mới
@@ -72,18 +71,15 @@ export class UserDeviceRepository extends BaseRepository<
             osVersion: data.osVersion,
             browserName: data.browserName,
             browserVersion: data.browserVersion,
-            // isTrusted và name có thể được cập nhật nếu được cung cấp và khác
-            ...(data.isTrusted !== undefined && {
-              isTrusted: data.isTrusted ? 1 : 0,
-            }),
-            ...(data.name && { name: data.name }),
+            isTrusted: data.isTrusted,
+            name: data.name,
             lastSeenAt: nowEpoch,
-            updatedAt: nowEpoch, // Drizzle sẽ xử lý $onUpdate cho cột này
+            updatedAt: nowEpoch,
           },
         })
         .returning();
 
-      return result[0] || null;
+      return result[0] ?? null;
     } catch (error) {
       console.error("Error in upsertDevice:", error);
       // Trong môi trường production, bạn có thể muốn throw một lỗi cụ thể hơn

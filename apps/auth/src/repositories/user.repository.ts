@@ -39,15 +39,18 @@ export class UserRepository extends BaseRepository<typeof users, NewUser> {
    * @param tx Transaction tùy chọn
    * @returns Người dùng được tìm thấy hoặc undefined nếu không tìm thấy
    */
-  public async findByEmail(email: string, tx?: DrizzleTransaction) {
-    return this.findOne({ email: email }, tx);
+  public async findByEmail(
+    email: string,
+    tx?: DrizzleTransaction
+  ): Promise<User | undefined> {
+    return this.findOne({ email: email }, tx) as any;
   }
 
   public async findByEmailOrUsername(
     identifier: string,
     tx?: DrizzleTransaction
   ): Promise<User | undefined> {
-    const queryRunner = tx || db;
+    const queryRunner = tx ?? db;
     const results = await queryRunner
       .select()
       .from(users)

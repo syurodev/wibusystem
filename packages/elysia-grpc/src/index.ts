@@ -3,6 +3,10 @@ import * as _protoLoader from "@grpc/proto-loader";
 import { Elysia } from "elysia";
 import path from "path";
 
+// Export định nghĩa Proto và các type
+export * from './protos';
+
+
 // Định nghĩa kiểu cho cấu hình của một proto file
 export interface GrpcProtoDefinition {
   packageName: string; // Ví dụ: 'com.grpc.nodejs.wibusystem.auth'

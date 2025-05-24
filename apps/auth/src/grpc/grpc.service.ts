@@ -104,6 +104,9 @@ export const authServiceHandlers = {
       let session = null;
       let deviceId = "";
 
+      // Lấy device ID từ request nếu có
+      const requestDeviceId = call.request.device_id || "";
+
       // Tìm roles và permissions trong Redis
       const userRolesKey = `auth:user:${userId}:roles`;
       let roleNames: string[] = [];
@@ -128,6 +131,25 @@ export const authServiceHandlers = {
         if (sessionCache) {
           session = JSON.parse(sessionCache);
           deviceId = session.device_id?.toString() ?? "";
+
+          // Kiểm tra nếu có device ID trong request và không khớp với device ID trong session
+          if (requestDeviceId && deviceId && requestDeviceId !== deviceId) {
+            console.warn(
+              `Token reuse detected! Session device: ${deviceId}, Request device: ${requestDeviceId}`
+            );
+
+            // Trả về lỗi xác thực
+            return callback(null, {
+              userId: "",
+              email: "",
+              isValid: false,
+              error: "Token is being used on a different device",
+              roles: [],
+              permissions: [],
+              sessionId: "",
+              deviceId: "",
+            });
+          }
         }
 
         // Xử lý thông tin roles từ cache

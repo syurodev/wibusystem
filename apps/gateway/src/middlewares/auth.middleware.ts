@@ -71,10 +71,14 @@ export function createAuthMiddleware(serviceName: 'auth' | 'novel') {
       );
     }
 
+    // Lấy thông tin thiết bị từ request
+    const deviceId = request.headers.get('User-Device-ID') || request.headers.get('X-Device-ID') || undefined;
+    
     // Nếu có token (bắt buộc hoặc tùy chọn), xác thực nó
     if (token) {
       try {
-        const validationResult = await authService.validateToken(token);
+        // Truyền cả token và device ID khi gọi xác thực
+        const validationResult = await authService.validateToken(token, deviceId);
 
         // Nếu token không hợp lệ
         if (!validationResult.isValid) {
@@ -86,8 +90,22 @@ export function createAuthMiddleware(serviceName: 'auth' | 'novel') {
           );
         }
 
-        // Chỉ truyền user ID vào header khi xác thực thành công
+        // Truyền thông tin user vào header khi xác thực thành công
         request.headers.set('X-User-ID', validationResult.userId);
+        request.headers.set('X-Session-ID', validationResult.sessionId || '');
+        request.headers.set('X-Device-ID', validationResult.deviceId || '');
+        
+        // Kiểm tra xem device ID trong request có khớp với device ID trong token không
+        const requestDeviceId = request.headers.get('User-Device-ID');
+        if (requestDeviceId && validationResult.deviceId && 
+            requestDeviceId !== validationResult.deviceId) {
+          set.status = HttpStatusCode.UNAUTHORIZED;
+          return createErrorResponse(
+            'Token is being used on a different device',
+            HttpStatusCode.UNAUTHORIZED,
+            MessageCode.AUTH_REFRESH_TOKEN_FAMILY_REUSED
+          );
+        }
 
         // Kiểm tra quyền truy cập nếu endpoint yêu cầu xác thực
         if (isAuthRequired(endpoint) && 

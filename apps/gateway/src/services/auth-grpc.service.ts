@@ -37,11 +37,16 @@ export class AuthGrpcService {
   /**
    * Xác thực token và lấy thông tin người dùng
    * @param token JWT token cần xác thực
+   * @param deviceId ID của thiết bị đang gửi request
    * @returns Thông tin xác thực từ token
    */
-  public async validateToken(token: string): Promise<ValidateTokenResponse> {
+  public async validateToken(token: string, deviceId?: string): Promise<ValidateTokenResponse> {
     try {
-      const request: ValidateTokenRequest = { token };
+      // Tạo request với device_id nếu có
+      const request: any = { 
+        token,
+        device_id: deviceId || ''
+      };
       
       return new Promise<ValidateTokenResponse>((resolve, reject) => {
         this.client.ValidateToken(request, (error: Error | null, response: ValidateTokenResponse) => {

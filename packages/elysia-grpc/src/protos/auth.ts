@@ -13,6 +13,8 @@ export const protobufPackage = "com.wibu.auth";
 /** The request message containing the token. */
 export interface ValidateTokenRequest {
   token: string;
+  /** Thiết bị đang gửi request */
+  device_id: string;
 }
 
 /** The response message containing user information or an error. */
@@ -29,7 +31,7 @@ export interface ValidateTokenResponse {
 }
 
 function createBaseValidateTokenRequest(): ValidateTokenRequest {
-  return { token: "" };
+  return { token: "", device_id: "" };
 }
 
 export const ValidateTokenRequest: MessageFns<ValidateTokenRequest> = {
@@ -39,6 +41,9 @@ export const ValidateTokenRequest: MessageFns<ValidateTokenRequest> = {
   ): BinaryWriter {
     if (message.token !== "") {
       writer.uint32(10).string(message.token);
+    }
+    if (message.device_id !== "") {
+      writer.uint32(18).string(message.device_id);
     }
     return writer;
   },
@@ -62,6 +67,14 @@ export const ValidateTokenRequest: MessageFns<ValidateTokenRequest> = {
           message.token = reader.string();
           continue;
         }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.device_id = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -74,6 +87,9 @@ export const ValidateTokenRequest: MessageFns<ValidateTokenRequest> = {
   fromJSON(object: any): ValidateTokenRequest {
     return {
       token: isSet(object.token) ? globalThis.String(object.token) : "",
+      device_id: isSet(object.device_id)
+        ? globalThis.String(object.device_id)
+        : "",
     };
   },
 
@@ -81,6 +97,9 @@ export const ValidateTokenRequest: MessageFns<ValidateTokenRequest> = {
     const obj: any = {};
     if (message.token !== "") {
       obj.token = message.token;
+    }
+    if (message.device_id !== "") {
+      obj.device_id = message.device_id;
     }
     return obj;
   },
@@ -95,6 +114,7 @@ export const ValidateTokenRequest: MessageFns<ValidateTokenRequest> = {
   ): ValidateTokenRequest {
     const message = createBaseValidateTokenRequest();
     message.token = object.token ?? "";
+    message.device_id = object.device_id ?? "";
     return message;
   },
 };

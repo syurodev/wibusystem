@@ -1,0 +1,135 @@
+syntax = "proto3";
+
+package user;
+
+option go_package = "github.com/yourorg/proto/user";
+
+// User service definition
+service UserService {
+  // Get user by ID
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  
+  // List users with pagination
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  
+  // Create new user
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  
+  // Update existing user
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+  
+  // Delete user
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+  
+  // Authenticate user
+  rpc AuthenticateUser(AuthenticateUserRequest) returns (AuthenticateUserResponse);
+}
+
+// User message definition
+message User {
+  string id = 1;
+  string email = 2;
+  string username = 3;
+  string first_name = 4;
+  string last_name = 5;
+  string avatar = 6;
+  string role = 7;
+  bool is_active = 8;
+  bool email_verified = 9;
+  string created_at = 10;
+  string updated_at = 11;
+}
+
+// Request messages
+message GetUserRequest {
+  string id = 1;
+}
+
+message ListUsersRequest {
+  int32 page = 1;
+  int32 limit = 2;
+  string sort_by = 3;
+  string sort_order = 4;
+  string search_query = 5;
+}
+
+message CreateUserRequest {
+  string email = 1;
+  string username = 2;
+  string password = 3;
+  string first_name = 4;
+  string last_name = 5;
+  string role = 6;
+}
+
+message UpdateUserRequest {
+  string id = 1;
+  string first_name = 2;
+  string last_name = 3;
+  string avatar = 4;
+  bool is_active = 5;
+}
+
+message DeleteUserRequest {
+  string id = 1;
+}
+
+message AuthenticateUserRequest {
+  string email = 1;
+  string password = 2;
+}
+
+// Response messages
+message GetUserResponse {
+  bool success = 1;
+  User user = 2;
+  string message = 3;
+}
+
+message ListUsersResponse {
+  bool success = 1;
+  repeated User users = 2;
+  PaginationInfo pagination = 3;
+  string message = 4;
+}
+
+message CreateUserResponse {
+  bool success = 1;
+  User user = 2;
+  string message = 3;
+}
+
+message UpdateUserResponse {
+  bool success = 1;
+  User user = 2;
+  string message = 3;
+}
+
+message DeleteUserResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message AuthenticateUserResponse {
+  bool success = 1;
+  User user = 2;
+  AuthTokens tokens = 3;
+  string message = 4;
+}
+
+// Common messages
+message PaginationInfo {
+  int32 page = 1;
+  int32 limit = 2;
+  int32 total = 3;
+  int32 total_pages = 4;
+  bool has_next = 5;
+  bool has_prev = 6;
+}
+
+message AuthTokens {
+  string access_token = 1;
+  string refresh_token = 2;
+  int32 expires_in = 3;
+  string token_type = 4;
+} 

@@ -1,0 +1,29 @@
+{
+  "name": "@repo/common",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./types": "./src/types/index.ts",
+    "./utils": "./src/utils/index.ts",
+    "./constants": "./src/constants/index.ts",
+    "./schemas": "./src/schemas/index.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint . --max-warnings 0",
+    "check-types": "tsc --noEmit",
+    "demo": "bun run demo/usage-demo.ts"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "*",
+    "@repo/typescript-config": "*",
+    "@types/node": "^22.15.3",
+    "eslint": "^9.27.0",
+    "typescript": "5.8.2"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  }
+}

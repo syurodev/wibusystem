@@ -1,0 +1,163 @@
+syntax = "proto3";
+
+package notification;
+
+option go_package = "github.com/yourorg/proto/notification";
+
+// Notification service definition
+service NotificationService {
+  // Send notification to user
+  rpc SendNotification(SendNotificationRequest) returns (SendNotificationResponse);
+  
+  // Send bulk notifications
+  rpc SendBulkNotifications(SendBulkNotificationsRequest) returns (SendBulkNotificationsResponse);
+  
+  // Get user notifications
+  rpc GetUserNotifications(GetUserNotificationsRequest) returns (GetUserNotificationsResponse);
+  
+  // Mark notification as read
+  rpc MarkAsRead(MarkAsReadRequest) returns (MarkAsReadResponse);
+  
+  // Mark all notifications as read
+  rpc MarkAllAsRead(MarkAllAsReadRequest) returns (MarkAllAsReadResponse);
+  
+  // Delete notification
+  rpc DeleteNotification(DeleteNotificationRequest) returns (DeleteNotificationResponse);
+  
+  // Subscribe to real-time notifications
+  rpc SubscribeToNotifications(SubscribeRequest) returns (stream NotificationEvent);
+}
+
+// Notification types
+enum NotificationType {
+  INFO = 0;
+  SUCCESS = 1;
+  WARNING = 2;
+  ERROR = 3;
+  SYSTEM = 4;
+}
+
+// Notification channels
+enum NotificationChannel {
+  IN_APP = 0;
+  EMAIL = 1;
+  SMS = 2;
+  PUSH = 3;
+  WEBHOOK = 4;
+}
+
+// Notification message definition
+message Notification {
+  string id = 1;
+  string user_id = 2;
+  string title = 3;
+  string content = 4;
+  NotificationType type = 5;
+  repeated NotificationChannel channels = 6;
+  bool is_read = 7;
+  string created_at = 8;
+  string read_at = 9;
+  map<string, string> metadata = 10;
+}
+
+// Request messages
+message SendNotificationRequest {
+  string user_id = 1;
+  string title = 2;
+  string content = 3;
+  NotificationType type = 4;
+  repeated NotificationChannel channels = 5;
+  map<string, string> metadata = 6;
+}
+
+message SendBulkNotificationsRequest {
+  repeated string user_ids = 1;
+  string title = 2;
+  string content = 3;
+  NotificationType type = 4;
+  repeated NotificationChannel channels = 5;
+  map<string, string> metadata = 6;
+}
+
+message GetUserNotificationsRequest {
+  string user_id = 1;
+  int32 page = 2;
+  int32 limit = 3;
+  bool unread_only = 4;
+  NotificationType type_filter = 5;
+}
+
+message MarkAsReadRequest {
+  string notification_id = 1;
+  string user_id = 2;
+}
+
+message MarkAllAsReadRequest {
+  string user_id = 1;
+}
+
+message DeleteNotificationRequest {
+  string notification_id = 1;
+  string user_id = 2;
+}
+
+message SubscribeRequest {
+  string user_id = 1;
+  repeated NotificationChannel channels = 2;
+}
+
+// Response messages
+message SendNotificationResponse {
+  bool success = 1;
+  Notification notification = 2;
+  string message = 3;
+}
+
+message SendBulkNotificationsResponse {
+  bool success = 1;
+  int32 sent_count = 2;
+  int32 failed_count = 3;
+  repeated string failed_user_ids = 4;
+  string message = 5;
+}
+
+message GetUserNotificationsResponse {
+  bool success = 1;
+  repeated Notification notifications = 2;
+  PaginationInfo pagination = 3;
+  int32 unread_count = 4;
+  string message = 5;
+}
+
+message MarkAsReadResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message MarkAllAsReadResponse {
+  bool success = 1;
+  int32 marked_count = 2;
+  string message = 3;
+}
+
+message DeleteNotificationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message NotificationEvent {
+  string event_type = 1; // "new_notification", "notification_read", etc.
+  Notification notification = 2;
+  string user_id = 3;
+  string timestamp = 4;
+}
+
+// Common messages
+message PaginationInfo {
+  int32 page = 1;
+  int32 limit = 2;
+  int32 total = 3;
+  int32 total_pages = 4;
+  bool has_next = 5;
+  bool has_prev = 6;
+} 

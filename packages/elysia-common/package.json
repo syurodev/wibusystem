@@ -1,0 +1,44 @@
+{
+  "name": "@repo/elysia-common",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./logger": "./src/logger/index.ts",
+    "./middleware": "./src/middleware/index.ts",
+    "./grpc": "./src/grpc/index.ts",
+    "./database": "./src/database/index.ts",
+    "./redis": "./src/redis/index.ts",
+    "./config": "./src/config/index.ts",
+    "./utils": "./src/utils/index.ts",
+    "./proto": "./src/proto/index.ts",
+    "./generated": "./src/generated/index.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint . --max-warnings 0",
+    "check-types": "tsc --noEmit",
+    "demo": "bun run demo/logger-demo.ts",
+    "demo:proto": "bun run demo/proto-demo.ts",
+    "generate-types": "bun run src/scripts/generate-types.ts",
+    "proto:build": "bun run generate-types"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "*",
+    "@repo/typescript-config": "*",
+    "@types/node": "^22.15.3",
+    "eslint": "^9.27.0",
+    "typescript": "5.8.2"
+  },
+  "dependencies": {
+    "@repo/common": "*",
+    "elysia": "latest",
+    "@bogeychan/elysia-logger": "0.1.8",
+    "@grpc/grpc-js": "1.13.4",
+    "@grpc/proto-loader": "0.7.15",
+    "ioredis": "5.6.1",
+    "drizzle-orm": "0.44.0",
+    "postgres": "3.4.7"
+  }
+}

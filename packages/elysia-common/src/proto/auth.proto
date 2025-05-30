@@ -1,0 +1,130 @@
+syntax = "proto3";
+
+package auth;
+
+option go_package = "github.com/yourorg/proto/auth";
+
+// Authentication service definition
+service AuthService {
+  // Login with email and password
+  rpc Login(LoginRequest) returns (LoginResponse);
+  
+  // Register new user
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  
+  // Refresh access token
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+  
+  // Logout user
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+  
+  // Verify JWT token
+  rpc VerifyToken(VerifyTokenRequest) returns (VerifyTokenResponse);
+  
+  // Reset password
+  rpc ResetPassword(ResetPasswordRequest) returns (ResetPasswordResponse);
+  
+  // Change password
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+}
+
+// Request messages
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+  bool remember_me = 3;
+}
+
+message RegisterRequest {
+  string email = 1;
+  string username = 2;
+  string password = 3;
+  string first_name = 4;
+  string last_name = 5;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message LogoutRequest {
+  string access_token = 1;
+  string refresh_token = 2;
+}
+
+message VerifyTokenRequest {
+  string token = 1;
+  string token_type = 2; // "access" or "refresh"
+}
+
+message ResetPasswordRequest {
+  string email = 1;
+}
+
+message ChangePasswordRequest {
+  string user_id = 1;
+  string old_password = 2;
+  string new_password = 3;
+}
+
+// Response messages
+message LoginResponse {
+  bool success = 1;
+  UserInfo user = 2;
+  TokenPair tokens = 3;
+  string message = 4;
+}
+
+message RegisterResponse {
+  bool success = 1;
+  UserInfo user = 2;
+  string message = 3;
+}
+
+message RefreshTokenResponse {
+  bool success = 1;
+  TokenPair tokens = 2;
+  string message = 3;
+}
+
+message LogoutResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message VerifyTokenResponse {
+  bool success = 1;
+  bool valid = 2;
+  string user_id = 3;
+  string role = 4;
+  string message = 5;
+}
+
+message ResetPasswordResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ChangePasswordResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Common messages
+message UserInfo {
+  string id = 1;
+  string email = 2;
+  string username = 3;
+  string first_name = 4;
+  string last_name = 5;
+  string role = 6;
+  bool is_active = 7;
+  bool email_verified = 8;
+}
+
+message TokenPair {
+  string access_token = 1;
+  string refresh_token = 2;
+  int32 expires_in = 3;
+  string token_type = 4;
+} 

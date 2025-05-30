@@ -1,0 +1,31 @@
+export const APP_CONFIG = {
+  SERVICE_PORT: process.env.SERVICE_PORT ?? 3101,
+  SERVICE_GRPC_PORT: process.env.SERVICE_GRPC_PORT ?? 31001,
+  NODE_ENV: process.env.NODE_ENV ?? 'development',
+};
+
+export const USER_POSTGRES_CONFIG = {
+  CONFIG_POSTGRESQL_USER_HOST:
+    process.env.CONFIG_POSTGRESQL_USER_HOST ?? 'localhost',
+  CONFIG_POSTGRESQL_USER_PORT: process.env.CONFIG_POSTGRESQL_USER_PORT ?? 5432,
+  CONFIG_POSTGRESQL_USER_USERNAME:
+    process.env.CONFIG_POSTGRESQL_USER_USERNAME ?? 'postgres',
+  CONFIG_POSTGRESQL_USER_PASSWORD:
+    process.env.CONFIG_POSTGRESQL_USER_PASSWORD ?? 'postgres',
+  CONFIG_POSTGRESQL_USER_DBNAME:
+    process.env.CONFIG_POSTGRESQL_USER_DBNAME ?? 'users',
+};
+
+export const REDIS_CONFIG = {
+  CONFIG_REDIS_HOST: process.env.CONFIG_REDIS_HOST ?? 'localhost',
+  CONFIG_REDIS_PORT: process.env.CONFIG_REDIS_PORT ?? 6379,
+  CONFIG_REDIS_PASSWORD: process.env.CONFIG_REDIS_PASSWORD ?? 'redis',
+  CONFIG_REDIS_DBNAME: process.env.CONFIG_REDIS_DBNAME ?? '0',
+};
+
+export const JWT_CONFIG = {
+  JWT_SECRET: process.env.JWT_SECRET ?? 'secret',
+  JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET ?? 'refresh_secret',
+  JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN ?? 1800,
+  JWT_REFRESH_EXPIRES_IN: process.env.JWT_REFRESH_EXPIRES_IN ?? 604800,
+};

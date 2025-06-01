@@ -17,7 +17,7 @@ console.info(
   `👤 Database User: ${USER_POSTGRES_CONFIG.CONFIG_POSTGRESQL_USER_USERNAME}`
 );
 
-const db = drizzle(connectionString, {
+const connection = drizzle(connectionString, {
   schema: databaseSchema,
   logger: APP_CONFIG.NODE_ENV === "development",
 });
@@ -28,7 +28,7 @@ async function testDatabaseConnection() {
     console.log("🔍 Đang test kết nối database...");
 
     // Test query đơn giản
-    const result = await db.execute(
+    const result = await connection.execute(
       sql`SELECT 1 as test, NOW() as current_time, version() as postgres_version`
     );
 
@@ -73,6 +73,6 @@ testDatabaseConnection().catch((error) => {
   process.exit(1);
 });
 
-export type Database = typeof db;
-export type DbTransactionAdapter = typeof db;
-export default db;
+export type Database = typeof connection;
+export type DbTransactionAdapter = typeof connection;
+export default connection;

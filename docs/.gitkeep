@@ -1,0 +1,2 @@
+# This file ensures that the docs directory is tracked by git
+# even when it contains empty subdirectories 

@@ -21,6 +21,9 @@ service AuthService {
   // Verify JWT token
   rpc VerifyToken(VerifyTokenRequest) returns (VerifyTokenResponse);
   
+  // Validate token for gateway authentication (includes roles & permissions)
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+  
   // Reset password
   rpc ResetPassword(ResetPasswordRequest) returns (ResetPasswordResponse);
   
@@ -55,6 +58,11 @@ message LogoutRequest {
 message VerifyTokenRequest {
   string token = 1;
   string token_type = 2; // "access" or "refresh"
+}
+
+// Gateway authentication request
+message ValidateTokenRequest {
+  string token = 1;
 }
 
 message ResetPasswordRequest {
@@ -100,6 +108,13 @@ message VerifyTokenResponse {
   string message = 5;
 }
 
+// Gateway authentication response with full user context
+message ValidateTokenResponse {
+  bool valid = 1;
+  UserInfo user = 2;
+  string error = 3;
+}
+
 message ResetPasswordResponse {
   bool success = 1;
   string message = 2;
@@ -120,6 +135,8 @@ message UserInfo {
   string role = 6;
   bool is_active = 7;
   bool email_verified = 8;
+  repeated string roles = 9;    // Multiple roles support
+  repeated string permissions = 10; // User permissions for gateway validation
 }
 
 message TokenPair {

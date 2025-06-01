@@ -2,15 +2,37 @@
   "name": "@repo/common",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    "./types": "./src/types/index.ts",
-    "./utils": "./src/utils/index.ts",
-    "./constants": "./src/constants/index.ts",
-    "./schemas": "./src/schemas/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.mjs",
+      "require": "./dist/types/index.js"
+    },
+    "./utils": {
+      "types": "./dist/utils/index.d.ts",
+      "import": "./dist/utils/index.mjs",
+      "require": "./dist/utils/index.js"
+    },
+    "./constants": {
+      "types": "./dist/constants/index.d.ts",
+      "import": "./dist/constants/index.mjs",
+      "require": "./dist/constants/index.js"
+    },
+    "./schemas": {
+      "types": "./dist/schemas/index.d.ts",
+      "import": "./dist/schemas/index.mjs",
+      "require": "./dist/schemas/index.js"
+    }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsup src/index.ts --format cjs,esm --dts",
     "dev": "tsc --watch",
     "lint": "eslint . --max-warnings 0",
     "check-types": "tsc --noEmit",
@@ -19,11 +41,17 @@
   "devDependencies": {
     "@repo/eslint-config": "*",
     "@repo/typescript-config": "*",
+    "@types/luxon": "^3.6.2",
     "@types/node": "^22.15.3",
     "eslint": "^9.27.0",
+    "tsup": "^8.5.0",
     "typescript": "5.8.2"
   },
   "dependencies": {
+    "luxon": "^3.6.1",
     "zod": "^3.23.8"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

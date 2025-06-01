@@ -2,20 +2,62 @@
   "name": "@repo/elysia-common",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    "./logger": "./src/logger/index.ts",
-    "./middleware": "./src/middleware/index.ts",
-    "./grpc": "./src/grpc/index.ts",
-    "./database": "./src/database/index.ts",
-    "./redis": "./src/redis/index.ts",
-    "./config": "./src/config/index.ts",
-    "./utils": "./src/utils/index.ts",
-    "./proto": "./src/proto/index.ts",
-    "./generated": "./src/generated/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./logger": {
+      "types": "./dist/logger/index.d.ts",
+      "import": "./dist/logger/index.mjs",
+      "require": "./dist/logger/index.js"
+    },
+    "./middleware": {
+      "types": "./dist/middleware/index.d.ts",
+      "import": "./dist/middleware/index.mjs",
+      "require": "./dist/middleware/index.js"
+    },
+    "./grpc": {
+      "types": "./dist/grpc/index.d.ts",
+      "import": "./dist/grpc/index.mjs",
+      "require": "./dist/grpc/index.js"
+    },
+    "./database": {
+      "types": "./dist/database/index.d.ts",
+      "import": "./dist/database/index.mjs",
+      "require": "./dist/database/index.js"
+    },
+    "./redis": {
+      "types": "./dist/redis/index.d.ts",
+      "import": "./dist/redis/index.mjs",
+      "require": "./dist/redis/index.js"
+    },
+    "./config": {
+      "types": "./dist/config/index.d.ts",
+      "import": "./dist/config/index.mjs",
+      "require": "./dist/config/index.js"
+    },
+    "./utils": {
+      "types": "./dist/utils/index.d.ts",
+      "import": "./dist/utils/index.mjs",
+      "require": "./dist/utils/index.js"
+    },
+    "./proto": {
+      "types": "./dist/proto/index.d.ts",
+      "import": "./dist/proto/index.mjs",
+      "require": "./dist/proto/index.js"
+    },
+    "./generated": {
+      "types": "./dist/generated/index.d.ts",
+      "import": "./dist/generated/index.mjs",
+      "require": "./dist/generated/index.js"
+    }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsup src/index.ts --format cjs,esm --dts",
     "dev": "tsc --watch",
     "lint": "eslint . --max-warnings 0",
     "check-types": "tsc --noEmit",
@@ -29,6 +71,7 @@
     "@repo/typescript-config": "*",
     "@types/node": "^22.15.3",
     "eslint": "^9.27.0",
+    "tsup": "^8.5.0",
     "typescript": "5.8.2"
   },
   "dependencies": {
@@ -40,5 +83,8 @@
     "ioredis": "5.6.1",
     "drizzle-orm": "0.44.0",
     "postgres": "3.4.7"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

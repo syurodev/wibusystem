@@ -1,7 +1,7 @@
 import swagger from "@elysiajs/swagger";
 import { Elysia } from "elysia";
 import { APP_CONFIG } from "./configs/env";
-import { apiRoutesV1 } from "./modules/v1";
+import { apiRoutes } from "./modules";
 
 const app = new Elysia()
   .get("/", () => "🔒 Auth Service - Device Registration Available")
@@ -10,7 +10,7 @@ const app = new Elysia()
     timestamp: new Date().toISOString(),
     service: "auth-service",
   }))
-  .use(apiRoutesV1)
+  .use(apiRoutes)
   .use(
     swagger({
       path: "/docs",

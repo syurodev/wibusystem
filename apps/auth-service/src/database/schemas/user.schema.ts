@@ -32,7 +32,7 @@ export const User = pgTable(
     metadata: json("metadata").notNull().default({}), // Dữ liệu mở rộng, lưu các thông tin bổ sung
     is_email_verified: boolean().notNull().default(false), // Trạng thái xác thực email
     is_phone_verified: boolean().notNull().default(false), // Trạng thái xác thực số điện thoại
-    is_active: boolean().notNull().default(true), // Trạng thái hoạt động của tài khoản
+    is_active: boolean().notNull().default(false), // Trạng thái hoạt động của tài khoản
     is_deleted: boolean().notNull().default(false), // Trạng thái xóa (soft delete)
     created_at: bigint({ mode: "number" }).notNull().default(0), // Thời gian tạo, dạng unix time
     updated_at: bigint({ mode: "number" }).notNull().default(0), // Thời gian cập nhật gần nhất, dạng unix time

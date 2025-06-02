@@ -3,7 +3,7 @@
 export type AuthRequirement = "none" | "optional" | "required";
 
 export interface EndpointConfig {
-  path: string;
+  sub_path: string;
   auth: AuthRequirement;
   roles?: string[];
   permissions?: string[];
@@ -29,60 +29,61 @@ export interface AuthorizationCache {
 
 export const API_ROUTES = {
   AUTH: {
+    PREFIX: "/auth",
     LOGIN: {
-      path: "/auth/login",
+      sub_path: "/login",
       auth: "none",
       description: "User login endpoint",
     } as EndpointConfig,
     REGISTER: {
-      path: "/auth/register",
+      sub_path: "/register",
       auth: "none",
       description: "User registration endpoint",
     } as EndpointConfig,
     LOGOUT: {
-      path: "/auth/logout",
+      sub_path: "/logout",
       auth: "required",
       description: "User logout endpoint",
     } as EndpointConfig,
     REFRESH: {
-      path: "/auth/refresh",
+      sub_path: "/refresh",
       auth: "none",
       description: "Token refresh endpoint",
     } as EndpointConfig,
     PROFILE: {
-      path: "/auth/profile",
+      sub_path: "/profile",
       auth: "required",
       description: "User profile management",
     } as EndpointConfig,
   },
   USERS: {
     LIST: {
-      path: "/users",
+      sub_path: "",
       auth: "required",
       permissions: ["users:read"],
       description: "List all users",
     } as EndpointConfig,
     DETAIL: {
-      path: "/users/:id",
+      sub_path: "/:id",
       auth: "required",
       permissions: ["users:read"],
       description: "Get user details",
     } as EndpointConfig,
     CREATE: {
-      path: "/users",
+      sub_path: "",
       auth: "required",
       permissions: ["users:create"],
       roles: ["admin", "manager"],
       description: "Create new user",
     } as EndpointConfig,
     UPDATE: {
-      path: "/users/:id",
+      sub_path: "/:id",
       auth: "required",
       permissions: ["users:update"],
       description: "Update user information",
     } as EndpointConfig,
     DELETE: {
-      path: "/users/:id",
+      sub_path: "/:id",
       auth: "required",
       permissions: ["users:delete"],
       roles: ["admin"],
@@ -91,21 +92,21 @@ export const API_ROUTES = {
   },
   ADMIN: {
     DASHBOARD: {
-      path: "/admin/dashboard",
+      sub_path: "/dashboard",
       auth: "required",
       roles: ["admin", "super_admin"],
       permissions: ["admin:read"],
       description: "Admin dashboard",
     } as EndpointConfig,
     USERS: {
-      path: "/admin/users",
+      sub_path: "/users",
       auth: "required",
       roles: ["admin", "super_admin"],
       permissions: ["admin:users:manage"],
       description: "Admin user management",
     } as EndpointConfig,
     LOGS: {
-      path: "/admin/logs",
+      sub_path: "/logs",
       auth: "required",
       roles: ["admin", "super_admin"],
       permissions: ["admin:logs:read"],
@@ -117,23 +118,24 @@ export const API_ROUTES = {
 // Helper functions
 export function getEndpointConfig(
   method: string,
-  path: string
+  prefix: string,
+  sub_path: string
 ): EndpointConfig | null {
   // Flatten all routes
   const allRoutes: EndpointConfig[] = [];
 
   Object.values(API_ROUTES).forEach((group) => {
     Object.values(group).forEach((route) => {
-      allRoutes.push(route);
+      if (typeof route !== "string") allRoutes.push(route);
     });
   });
 
   // Find matching route (support path parameters)
   return (
     allRoutes.find((route) => {
-      const routePattern = route.path.replace(/:[\w]+/g, "[^/]+");
+      const routePattern = prefix + route.sub_path.replace(/:[\w]+/g, "[^/]+");
       const regex = new RegExp(`^${routePattern}$`);
-      return regex.test(path);
+      return regex.test(prefix + sub_path);
     }) || null
   );
 }
@@ -141,10 +143,11 @@ export function getEndpointConfig(
 // Dynamic configuration helpers
 export function getEndpointConfigWithCache(
   method: string,
-  path: string,
+  prefix: string,
+  sub_path: string,
   cache: AuthorizationCache
 ): DynamicEndpointConfig | EndpointConfig | null {
-  const cacheKey = `${method}:${path}`;
+  const cacheKey = `${method}:${prefix}:${sub_path}`;
 
   // Check cache first
   if (cache.endpoints.has(cacheKey)) {
@@ -155,7 +158,7 @@ export function getEndpointConfigWithCache(
   }
 
   // Fallback to static config
-  return getEndpointConfig(method, path);
+  return getEndpointConfig(method, prefix, sub_path);
 }
 
 export function checkPermissions(

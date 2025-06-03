@@ -7,7 +7,20 @@ interface LoggerConfig {
   service?: string;
   environment?: string;
   stream?: any;
+  colorize?: boolean;
+  prettyPrint?: boolean;
+  customColors?: Record<string, string>;
 }
+
+// Default color scheme cho các log levels
+const DEFAULT_COLORS = {
+  0: "blueBright", // trace - xanh dương sáng
+  10: "cyan", // debug - xanh ngọc
+  20: "green", // info - xanh lá
+  30: "yellow", // warn - vàng
+  40: "red", // error - đỏ
+  50: "magentaBright", // fatal - tím sáng
+} as const;
 
 // Create logger plugin for Elysia with custom config
 export const createLoggerPlugin = (config: LoggerConfig = {}) => {
@@ -16,19 +29,54 @@ export const createLoggerPlugin = (config: LoggerConfig = {}) => {
     service = "elysia-service",
     environment = process.env.NODE_ENV ?? "development",
     stream,
+    colorize = true,
+    prettyPrint = true,
+    customColors,
   } = config;
 
   const isDev = environment === "development";
 
+  // Merge custom colors với default colors
+  const colors = customColors
+    ? { ...DEFAULT_COLORS, ...customColors }
+    : DEFAULT_COLORS;
+
+  // Cấu hình transport cho development với pino-pretty
+  const transport =
+    isDev && prettyPrint
+      ? {
+          target: "pino-pretty",
+          options: {
+            colorize: colorize,
+            translateTime: "HH:MM:ss",
+            ignore: "pid,hostname",
+            messageFormat: `[${service}] {msg}`,
+            customColors: colors,
+            levelFirst: true,
+            singleLine: false,
+            // Thêm các options khác cho pino-pretty
+            crlf: false,
+            hideObject: false,
+            errorLikeObjectKeys: ["err", "error"],
+          },
+        }
+      : undefined;
+
   return elysiaLogger({
     level,
-    stream:
-      stream ??
-      (isDev
-        ? {
-            write: (msg: string) => console.log(msg.trim()),
-          }
-        : undefined),
+    transport,
+    // Fallback stream nếu không dùng transport
+    stream: !transport
+      ? (stream ??
+        (isDev
+          ? {
+              write: (msg: string) => console.log(msg.trim()),
+            }
+          : undefined))
+      : undefined,
+    // Thêm base configuration cho pino
+    name: service,
+    timestamp: () => `,"time":"${new Date().toISOString()}"`,
   });
 };
 
@@ -36,11 +84,43 @@ export const createLoggerPlugin = (config: LoggerConfig = {}) => {
 class AppLogger {
   private readonly serviceName: string;
   private readonly environment: string;
+  private readonly colorize: boolean;
 
   constructor(config: LoggerConfig = {}) {
     this.serviceName = config.service ?? "elysia-service";
     this.environment =
       config.environment ?? process.env.NODE_ENV ?? "development";
+    this.colorize = config.colorize ?? true;
+  }
+
+  private getColoredLevel(level: string): string {
+    if (!this.colorize || this.environment !== "development") {
+      return level.toUpperCase();
+    }
+
+    // Import colorette dynamically để tránh dependency issues
+    try {
+      const colorette = require("colorette");
+      switch (level.toLowerCase()) {
+        case "trace":
+          return colorette.blueBright("TRACE");
+        case "debug":
+          return colorette.cyan("DEBUG");
+        case "info":
+          return colorette.green("INFO");
+        case "warn":
+          return colorette.yellow("WARN");
+        case "error":
+          return colorette.red("ERROR");
+        case "fatal":
+          return colorette.magentaBright("FATAL");
+        default:
+          return level.toUpperCase();
+      }
+    } catch {
+      // Fallback nếu colorette không available
+      return level.toUpperCase();
+    }
   }
 
   private formatMessage(
@@ -59,7 +139,15 @@ class AppLogger {
     };
 
     if (this.environment === "development") {
-      return `[${timestamp}] ${level.toUpperCase()} (${this.serviceName}): ${message}${meta ? ` ${JSON.stringify(meta)}` : ""}`;
+      const coloredLevel = this.getColoredLevel(level);
+      const time = this.colorize
+        ? `\x1b[90m${timestamp.slice(11, 23)}\x1b[0m` // Gray color for timestamp
+        : timestamp.slice(11, 23);
+      const serviceName = this.colorize
+        ? `\x1b[36m${this.serviceName}\x1b[0m` // Cyan for service name
+        : this.serviceName;
+
+      return `${coloredLevel} [${time}] (${serviceName}): ${message}${meta ? ` ${JSON.stringify(meta)}` : ""}`;
     }
 
     return JSON.stringify(logData);
@@ -166,15 +254,78 @@ class AppLogger {
 let loggerInstance: AppLogger;
 
 export const createLogger = (config?: LoggerConfig): AppLogger => {
+  // Tạo instance mới nếu có config, hoặc return singleton nếu không có config
+  if (config) {
+    const defaultConfig: LoggerConfig = {
+      service: "elysia-service",
+      environment: process.env.NODE_ENV ?? "development",
+      colorize: (process.env.NODE_ENV ?? "development") === "development",
+      ...config,
+    };
+    return new AppLogger(defaultConfig);
+  }
+
+  // Return singleton cho trường hợp không có config
   if (!loggerInstance) {
-    loggerInstance = new AppLogger(config);
+    const defaultConfig: LoggerConfig = {
+      service: "elysia-service",
+      environment: process.env.NODE_ENV ?? "development",
+      colorize: (process.env.NODE_ENV ?? "development") === "development",
+    };
+    loggerInstance = new AppLogger(defaultConfig);
   }
   return loggerInstance;
 };
 
-// Export logger instance cho standalone usage
+// Export logger instance cho standalone usage với colors enabled
 export const logger = createLogger();
 
 // Export types và classes
 export { AppLogger };
 export type { LoggerConfig };
+
+// Export default colors để user có thể reference
+export const DEFAULT_LOG_COLORS = DEFAULT_COLORS;
+
+// Utility function để tạo custom color scheme
+export const createColorScheme = (
+  overrides: Partial<Record<keyof typeof DEFAULT_COLORS, string>>
+) => {
+  return { ...DEFAULT_COLORS, ...overrides };
+};
+
+// Predefined color schemes
+export const COLOR_SCHEMES = {
+  // Bright and vibrant colors
+  bright: {
+    0: "cyanBright", // trace
+    10: "blueBright", // debug
+    20: "greenBright", // info
+    30: "yellowBright", // warn
+    40: "redBright", // error
+    50: "magentaBright", // fatal
+  },
+
+  // Subtle colors
+  subtle: {
+    0: "gray", // trace
+    10: "cyan", // debug
+    20: "blue", // info
+    30: "yellow", // warn
+    40: "red", // error
+    50: "magenta", // fatal
+  },
+
+  // Monochrome with intensity
+  mono: {
+    0: "gray", // trace
+    10: "white", // debug
+    20: "whiteBright", // info
+    30: "yellowBright", // warn
+    40: "redBright", // error
+    50: "red", // fatal
+  },
+
+  // Default scheme
+  default: DEFAULT_COLORS,
+} as const;

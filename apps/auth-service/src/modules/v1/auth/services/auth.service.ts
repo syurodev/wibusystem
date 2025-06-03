@@ -1,4 +1,5 @@
 import { ERROR_CODES } from "@repo/common";
+import { CustomExeption } from "@repo/elysia-common";
 import { UserRepository } from "../../../../database/repositories/user.repository";
 import type { UserInsert, UserSelect } from "../../../../database/schemas";
 import { hashPassword } from "../../../../utils/crypto.utils";
@@ -57,7 +58,7 @@ export class AuthService {
       // Ném lại error với message phù hợp
       if (error instanceof Error) {
         if (error.message === ERROR_CODES.RESOURCE.ALREADY_EXISTS) {
-          throw new Error("Email đã được sử dụng");
+          throw new CustomExeption("Email đã được sử dụng");
         }
       }
 

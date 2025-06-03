@@ -80,3 +80,5 @@ export const createPaginatedResponseSchema = <T extends TSchema>(
   const paginatedDataSchema = createPaginatedDataSchema(itemSchema);
   return createSuccessResponseSchema(paginatedDataSchema);
 };
+
+export * from "./all-error-handler";

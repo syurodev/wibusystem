@@ -1,3 +1,4 @@
+export * from "./exeption";
 export * from "./grpc";
 export * from "./logger";
 export * from "./proto";

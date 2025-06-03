@@ -54,6 +54,11 @@
       "types": "./dist/generated/index.d.ts",
       "import": "./dist/generated/index.mjs",
       "require": "./dist/generated/index.js"
+    },
+    "./exeption": {
+      "types": "./dist/exeption/index.d.ts",
+      "import": "./dist/exeption/index.mjs",
+      "require": "./dist/exeption/index.js"
     }
   },
   "scripts": {
@@ -78,6 +83,8 @@
     "@repo/common": "*",
     "elysia": "latest",
     "@bogeychan/elysia-logger": "0.1.8",
+    "pino-pretty": "^13.0.0",
+    "colorette": "^2.0.20",
     "@grpc/grpc-js": "1.13.4",
     "@grpc/proto-loader": "0.7.15",
     "ioredis": "5.6.1",

@@ -3,6 +3,8 @@
  * Hỗ trợ development, staging, và production environments
  */
 
+import { logger } from "@repo/elysia-common";
+
 // Validate required environment variables
 function getEnvVar(name: string, defaultValue?: string): string {
   const value = process.env[name] || defaultValue;
@@ -147,9 +149,9 @@ if (APP_CONFIG.NODE_ENV === "production") {
 
 // Development warnings
 if (APP_CONFIG.NODE_ENV === "development") {
-  console.log("🔧 Running in development mode");
+  logger.info("🔧 Running in development mode");
   if (APP_CONFIG.DEVICE_TOKEN_SECRET.includes("dev-secret")) {
-    console.warn("⚠️  Using development secrets - not suitable for production");
+    logger.info("⚠️  Using development secrets - not suitable for production");
   }
 }
 
@@ -168,17 +170,17 @@ export const COMPUTED_CONFIG = {
 } as const;
 
 // Log configuration summary
-console.log("📋 Auth Service Configuration:");
-console.log(`   Environment: ${APP_CONFIG.NODE_ENV}`);
-console.log(
+logger.info("📋 Auth Service Configuration:");
+logger.info(`   Environment: ${APP_CONFIG.NODE_ENV}`);
+logger.info(
   `   Service: ${APP_CONFIG.SERVICE_NAME} v${APP_CONFIG.SERVICE_VERSION}`
 );
-console.log(`   Port: ${APP_CONFIG.SERVICE_PORT}`);
-console.log(
+logger.info(`   Port: ${APP_CONFIG.SERVICE_PORT}`);
+logger.info(
   `   Database: ${USER_POSTGRES_CONFIG.CONFIG_POSTGRESQL_USER_HOST}:${USER_POSTGRES_CONFIG.CONFIG_POSTGRESQL_USER_PORT}/${USER_POSTGRES_CONFIG.CONFIG_POSTGRESQL_USER_DBNAME}`
 );
-console.log(`   Log Level: ${APP_CONFIG.LOG_LEVEL}`);
-console.log(
+logger.info(`   Log Level: ${APP_CONFIG.LOG_LEVEL}`);
+logger.info(
   `   Metrics: ${APP_CONFIG.ENABLE_METRICS ? "Enabled" : "Disabled"}`
 );
 

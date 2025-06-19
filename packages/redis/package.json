@@ -1,0 +1,28 @@
+{
+  "name": "@repo/redis",
+  "module": "./dist/index.mjs",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup",
+    "test": "bun test --preload ./tests/setup.ts",
+    "test:watch": "bun test --watch --preload ./tests/setup.ts",
+    "test:coverage": "bun test --coverage --preload ./tests/setup.ts",
+    "test:ci": "bun test --reporter=junit --reporter-outfile=./test-results.xml --preload ./tests/setup.ts",
+    "test:update-snapshots": "bun test --update-snapshots --preload ./tests/setup.ts",
+    "lint": "eslint src --max-warnings 0",
+    "check-types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@repo/eslint-config": "*",
+    "@repo/typescript-config": "*",
+    "tsup": "^8.5.0",
+    "eslint": "^9.28.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {}
+}

@@ -16,6 +16,7 @@
         "elysia": "latest",
       },
       "devDependencies": {
+        "@repo/typescript-config": "*",
         "bun-types": "latest",
       },
     },
@@ -26,6 +27,7 @@
         "elysia": "latest",
       },
       "devDependencies": {
+        "@repo/typescript-config": "*",
         "bun-types": "latest",
       },
     },
@@ -74,6 +76,19 @@
         "@types/bun": "latest",
         "eslint": "^9.28.0",
         "ts-proto": "2.7.5",
+        "tsup": "^8.5.0",
+      },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
+    },
+    "packages/redis": {
+      "name": "@repo/redis",
+      "devDependencies": {
+        "@repo/eslint-config": "*",
+        "@repo/typescript-config": "*",
+        "@types/bun": "latest",
+        "eslint": "^9.28.0",
         "tsup": "^8.5.0",
       },
       "peerDependencies": {
@@ -265,6 +280,8 @@
     "@repo/eslint-config": ["@repo/eslint-config@workspace:packages/eslint-config"],
 
     "@repo/grpc": ["@repo/grpc@workspace:packages/grpc"],
+
+    "@repo/redis": ["@repo/redis@workspace:packages/redis"],
 
     "@repo/types": ["@repo/types@workspace:packages/types"],
 

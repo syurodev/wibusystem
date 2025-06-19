@@ -1,0 +1,25 @@
+{
+  "name": "@repo/database",
+  "version": "1.0.0",
+  "description": "Shared database utilities for microservices",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "mongodb": "^6.8.0",
+    "@repo/utils": "*"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "*",
+    "tsup": "^8.0.0",
+    "typescript": "^5.8.2",
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "bun": "^1.2.0"
+  }
+}

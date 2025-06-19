@@ -8,13 +8,13 @@ import type {
 } from "./types";
 
 export class RedisClient {
-  private pool: RedisConnectionPool;
-  private config: RedisConfig;
-  private events: Partial<RedisEvents> = {};
+  private readonly pool: RedisConnectionPool;
+  private readonly config: RedisConfig;
+  private readonly events: Partial<RedisEvents> = {};
 
   constructor(config: RedisConfig = {}) {
     this.config = {
-      url: process.env.REDIS_URL || "redis://localhost:6379",
+      url: process.env.REDIS_URL ?? "redis://localhost:6379",
       maxConnections: 10,
       connectionTimeout: 10000,
       idleTimeout: 30000,

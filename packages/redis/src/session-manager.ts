@@ -1,31 +1,49 @@
+import { getCurrentUnixTimestamp } from "@repo/utils";
 import type { RedisClient } from "./redis-client";
 import type { RedisCallback, SessionData, SessionOptions } from "./types";
 
 export class SessionManager {
-  private redis: RedisClient;
-  private defaultTTL: number;
-  private prefix: string;
+  private readonly redis: RedisClient;
+  private readonly defaultTTL: number;
+  private readonly prefix: string;
+  private readonly userIndexPrefix: string;
+  private readonly deviceIndexPrefix: string;
 
   constructor(redis: RedisClient, options: SessionOptions = {}) {
     this.redis = redis;
-    this.defaultTTL = options.ttl || 86400; // 24 hours default
-    this.prefix = options.prefix || "session:";
+    this.defaultTTL = options.ttl ?? 86400; // 24 hours default
+    this.prefix = options.prefix ?? "session:";
+    this.userIndexPrefix = `${this.prefix}user:`;
+    this.deviceIndexPrefix = `${this.prefix}device:`;
   }
 
   private getKey(sessionId: string): string {
     return `${this.prefix}${sessionId}`;
   }
 
+  private getUserIndexKey(userId: number): string {
+    return `${this.userIndexPrefix}${userId}`;
+  }
+
+  private getDeviceIndexKey(deviceId: string): string {
+    return `${this.deviceIndexPrefix}${deviceId}`;
+  }
+
+  private getUserDeviceIndexKey(userId: number, deviceId: string): string {
+    return `${this.userIndexPrefix}${userId}:device:${deviceId}`;
+  }
+
   private generateSessionId(): string {
     // Tạo session ID an toàn
-    const timestamp = Date.now().toString(36);
+    const timestamp = getCurrentUnixTimestamp().toString();
     const random = Math.random().toString(36).substring(2);
     return `${timestamp}-${random}`;
   }
 
   // Tạo session mới
   async create(
-    userId: string,
+    userId: number,
+    deviceId: string,
     data: Record<string, any> = {},
     ttl: number = this.defaultTTL
   ): Promise<string> {
@@ -34,12 +52,31 @@ export class SessionManager {
 
     const sessionData: SessionData = {
       userId,
+      deviceId,
       data,
-      createdAt: Date.now(),
-      expiresAt: Date.now() + ttl * 1000,
+      createdAt: getCurrentUnixTimestamp(),
+      expiresAt: getCurrentUnixTimestamp() + ttl,
     };
 
+    // Lưu session data
     await this.redis.set(sessionKey, JSON.stringify(sessionData), ttl);
+
+    // Tạo indexes cho user, device và user-device combination
+    const userIndexKey = this.getUserIndexKey(userId);
+    const deviceIndexKey = this.getDeviceIndexKey(deviceId);
+    const userDeviceIndexKey = this.getUserDeviceIndexKey(userId, deviceId);
+
+    // Thêm sessionId vào các index sets
+    await Promise.all([
+      this.redis.sadd(userIndexKey, sessionId),
+      this.redis.sadd(deviceIndexKey, sessionId),
+      this.redis.sadd(userDeviceIndexKey, sessionId),
+      // Set expiration cho các index keys
+      this.redis.expire(userIndexKey, ttl + 3600), // Thêm 1 giờ để cleanup
+      this.redis.expire(deviceIndexKey, ttl + 3600),
+      this.redis.expire(userDeviceIndexKey, ttl + 3600),
+    ]);
+
     return sessionId;
   }
 
@@ -203,50 +240,89 @@ export class SessionManager {
     const sessionKey = this.getKey(sessionId);
 
     if (callback) {
-      return this.redis.del(sessionKey, (error, result) => {
-        if (error) {
-          callback(error);
-          return;
+      try {
+        // Lấy session data để xóa khỏi indexes
+        const sessionData = await this.get(sessionId);
+        if (sessionData) {
+          const userIndexKey = this.getUserIndexKey(sessionData.userId);
+          const deviceIndexKey = this.getDeviceIndexKey(sessionData.deviceId);
+          const userDeviceIndexKey = this.getUserDeviceIndexKey(
+            sessionData.userId,
+            sessionData.deviceId
+          );
+
+          // Xóa khỏi indexes
+          await Promise.all([
+            this.redis.srem(userIndexKey, sessionId),
+            this.redis.srem(deviceIndexKey, sessionId),
+            this.redis.srem(userDeviceIndexKey, sessionId),
+          ]);
         }
-        callback(null, (result as number) > 0);
-      });
+
+        return this.redis.del(sessionKey, (error, result) => {
+          if (error) {
+            callback(error);
+            return;
+          }
+          callback(null, (result as number) > 0);
+        });
+      } catch (error) {
+        callback(error as Error);
+      }
+      return;
+    }
+
+    // Lấy session data để xóa khỏi indexes
+    const sessionData = await this.get(sessionId);
+    if (sessionData) {
+      const userIndexKey = this.getUserIndexKey(sessionData.userId);
+      const deviceIndexKey = this.getDeviceIndexKey(sessionData.deviceId);
+      const userDeviceIndexKey = this.getUserDeviceIndexKey(
+        sessionData.userId,
+        sessionData.deviceId
+      );
+
+      // Xóa khỏi indexes
+      await Promise.all([
+        this.redis.srem(userIndexKey, sessionId),
+        this.redis.srem(deviceIndexKey, sessionId),
+        this.redis.srem(userDeviceIndexKey, sessionId),
+      ]);
     }
 
     const result = await this.redis.del(sessionKey);
-    return (result as number) > 0;
+    return result > 0;
   }
 
   // Destroy all sessions của user
-  async destroyUserSessions(userId: string): Promise<number>;
+  async destroyUserSessions(userId: number): Promise<number>;
   async destroyUserSessions(
-    userId: string,
+    userId: number,
     callback: RedisCallback<number>
   ): Promise<void>;
   async destroyUserSessions(
-    userId: string,
+    userId: number,
     callback?: RedisCallback<number>
   ): Promise<number | void> {
+    const userIndexKey = this.getUserIndexKey(userId);
+
     if (callback) {
       try {
-        const pattern = `${this.prefix}*`;
-        const keys = (await this.redis.send("KEYS", [pattern])) as string[];
+        // Sử dụng index để lấy danh sách session của user
+        const sessionIds = (await this.redis.send("SMEMBERS", [
+          userIndexKey,
+        ])) as string[];
 
         let deletedCount = 0;
-        for (const key of keys) {
-          const sessionData = await this.redis.get(key);
-          if (sessionData) {
-            try {
-              const parsed = JSON.parse(sessionData) as SessionData;
-              if (parsed.userId === userId) {
-                await this.redis.del(key);
-                deletedCount++;
-              }
-            } catch {
-              // Skip invalid session data
-            }
+        for (const sessionId of sessionIds) {
+          const destroyed = await this.destroy(sessionId);
+          if (destroyed) {
+            deletedCount++;
           }
         }
 
+        // Xóa user index
+        await this.redis.del(userIndexKey);
         callback(null, deletedCount);
       } catch (error) {
         callback(error as Error);
@@ -254,25 +330,21 @@ export class SessionManager {
       return;
     }
 
-    const pattern = `${this.prefix}*`;
-    const keys = (await this.redis.send("KEYS", [pattern])) as string[];
+    // Sử dụng index để lấy danh sách session của user
+    const sessionIds = (await this.redis.send("SMEMBERS", [
+      userIndexKey,
+    ])) as string[];
 
     let deletedCount = 0;
-    for (const key of keys) {
-      const sessionData = await this.redis.get(key);
-      if (sessionData) {
-        try {
-          const parsed = JSON.parse(sessionData) as SessionData;
-          if (parsed.userId === userId) {
-            await this.redis.del(key);
-            deletedCount++;
-          }
-        } catch {
-          // Skip invalid session data
-        }
+    for (const sessionId of sessionIds) {
+      const destroyed = await this.destroy(sessionId);
+      if (destroyed) {
+        deletedCount++;
       }
     }
 
+    // Xóa user index
+    await this.redis.del(userIndexKey);
     return deletedCount;
   }
 
@@ -302,35 +374,31 @@ export class SessionManager {
 
   // Get all sessions của user
   async getUserSessions(
-    userId: string
+    userId: number
   ): Promise<Array<{ sessionId: string; data: SessionData }>>;
   async getUserSessions(
-    userId: string,
+    userId: number,
     callback: RedisCallback<Array<{ sessionId: string; data: SessionData }>>
   ): Promise<void>;
   async getUserSessions(
-    userId: string,
+    userId: number,
     callback?: RedisCallback<Array<{ sessionId: string; data: SessionData }>>
   ): Promise<Array<{ sessionId: string; data: SessionData }> | void> {
+    const userIndexKey = this.getUserIndexKey(userId);
+
     if (callback) {
       try {
-        const pattern = `${this.prefix}*`;
-        const keys = (await this.redis.send("KEYS", [pattern])) as string[];
+        // Sử dụng index để lấy danh sách session của user
+        const sessionIds = (await this.redis.send("SMEMBERS", [
+          userIndexKey,
+        ])) as string[];
         const userSessions: Array<{ sessionId: string; data: SessionData }> =
           [];
 
-        for (const key of keys) {
-          const sessionData = await this.redis.get(key);
+        for (const sessionId of sessionIds) {
+          const sessionData = await this.get(sessionId);
           if (sessionData) {
-            try {
-              const parsed = JSON.parse(sessionData) as SessionData;
-              if (parsed.userId === userId) {
-                const sessionId = key.replace(this.prefix, "");
-                userSessions.push({ sessionId, data: parsed });
-              }
-            } catch {
-              // Skip invalid session data
-            }
+            userSessions.push({ sessionId, data: sessionData });
           }
         }
 
@@ -341,29 +409,232 @@ export class SessionManager {
       return;
     }
 
-    const pattern = `${this.prefix}*`;
-    const keys = (await this.redis.send("KEYS", [pattern])) as string[];
+    // Sử dụng index để lấy danh sách session của user
+    const sessionIds = (await this.redis.send("SMEMBERS", [
+      userIndexKey,
+    ])) as string[];
     const userSessions: Array<{ sessionId: string; data: SessionData }> = [];
 
-    for (const key of keys) {
-      const sessionData = await this.redis.get(key);
+    for (const sessionId of sessionIds) {
+      const sessionData = await this.get(sessionId);
       if (sessionData) {
-        try {
-          const parsed = JSON.parse(sessionData) as SessionData;
-          if (parsed.userId === userId) {
-            const sessionId = key.replace(this.prefix, "");
-            userSessions.push({ sessionId, data: parsed });
-          }
-        } catch {
-          // Skip invalid session data
-        }
+        userSessions.push({ sessionId, data: sessionData });
       }
     }
 
     return userSessions;
   }
 
-  // Cleanup expired sessions
+  // Get all sessions của device
+  async getDeviceSessions(
+    deviceId: string
+  ): Promise<Array<{ sessionId: string; data: SessionData }>>;
+  async getDeviceSessions(
+    deviceId: string,
+    callback: RedisCallback<Array<{ sessionId: string; data: SessionData }>>
+  ): Promise<void>;
+  async getDeviceSessions(
+    deviceId: string,
+    callback?: RedisCallback<Array<{ sessionId: string; data: SessionData }>>
+  ): Promise<Array<{ sessionId: string; data: SessionData }> | void> {
+    const deviceIndexKey = this.getDeviceIndexKey(deviceId);
+
+    if (callback) {
+      try {
+        const sessionIds = (await this.redis.send("SMEMBERS", [
+          deviceIndexKey,
+        ])) as string[];
+        const deviceSessions: Array<{ sessionId: string; data: SessionData }> =
+          [];
+
+        for (const sessionId of sessionIds) {
+          const sessionData = await this.get(sessionId);
+          if (sessionData) {
+            deviceSessions.push({ sessionId, data: sessionData });
+          }
+        }
+
+        callback(null, deviceSessions);
+      } catch (error) {
+        callback(error as Error);
+      }
+      return;
+    }
+
+    const sessionIds = (await this.redis.send("SMEMBERS", [
+      deviceIndexKey,
+    ])) as string[];
+    const deviceSessions: Array<{ sessionId: string; data: SessionData }> = [];
+
+    for (const sessionId of sessionIds) {
+      const sessionData = await this.get(sessionId);
+      if (sessionData) {
+        deviceSessions.push({ sessionId, data: sessionData });
+      }
+    }
+
+    return deviceSessions;
+  }
+
+  // Destroy all sessions của device
+  async destroyDeviceSessions(deviceId: string): Promise<number>;
+  async destroyDeviceSessions(
+    deviceId: string,
+    callback: RedisCallback<number>
+  ): Promise<void>;
+  async destroyDeviceSessions(
+    deviceId: string,
+    callback?: RedisCallback<number>
+  ): Promise<number | void> {
+    const deviceIndexKey = this.getDeviceIndexKey(deviceId);
+
+    if (callback) {
+      try {
+        const sessionIds = (await this.redis.send("SMEMBERS", [
+          deviceIndexKey,
+        ])) as string[];
+
+        let deletedCount = 0;
+        for (const sessionId of sessionIds) {
+          const destroyed = await this.destroy(sessionId);
+          if (destroyed) {
+            deletedCount++;
+          }
+        }
+
+        await this.redis.del(deviceIndexKey);
+        callback(null, deletedCount);
+      } catch (error) {
+        callback(error as Error);
+      }
+      return;
+    }
+
+    const sessionIds = (await this.redis.send("SMEMBERS", [
+      deviceIndexKey,
+    ])) as string[];
+
+    let deletedCount = 0;
+    for (const sessionId of sessionIds) {
+      const destroyed = await this.destroy(sessionId);
+      if (destroyed) {
+        deletedCount++;
+      }
+    }
+
+    await this.redis.del(deviceIndexKey);
+    return deletedCount;
+  }
+
+  // Get sessions của user trên device cụ thể
+  async getUserDeviceSessions(
+    userId: number,
+    deviceId: string
+  ): Promise<Array<{ sessionId: string; data: SessionData }>>;
+  async getUserDeviceSessions(
+    userId: number,
+    deviceId: string,
+    callback: RedisCallback<Array<{ sessionId: string; data: SessionData }>>
+  ): Promise<void>;
+  async getUserDeviceSessions(
+    userId: number,
+    deviceId: string,
+    callback?: RedisCallback<Array<{ sessionId: string; data: SessionData }>>
+  ): Promise<Array<{ sessionId: string; data: SessionData }> | void> {
+    const userDeviceIndexKey = this.getUserDeviceIndexKey(userId, deviceId);
+
+    if (callback) {
+      try {
+        const sessionIds = (await this.redis.send("SMEMBERS", [
+          userDeviceIndexKey,
+        ])) as string[];
+        const sessions: Array<{ sessionId: string; data: SessionData }> = [];
+
+        for (const sessionId of sessionIds) {
+          const sessionData = await this.get(sessionId);
+          if (sessionData) {
+            sessions.push({ sessionId, data: sessionData });
+          }
+        }
+
+        callback(null, sessions);
+      } catch (error) {
+        callback(error as Error);
+      }
+      return;
+    }
+
+    const sessionIds = (await this.redis.send("SMEMBERS", [
+      userDeviceIndexKey,
+    ])) as string[];
+    const sessions: Array<{ sessionId: string; data: SessionData }> = [];
+
+    for (const sessionId of sessionIds) {
+      const sessionData = await this.get(sessionId);
+      if (sessionData) {
+        sessions.push({ sessionId, data: sessionData });
+      }
+    }
+
+    return sessions;
+  }
+
+  // Destroy sessions của user trên device cụ thể
+  async destroyUserDeviceSessions(
+    userId: number,
+    deviceId: string
+  ): Promise<number>;
+  async destroyUserDeviceSessions(
+    userId: number,
+    deviceId: string,
+    callback: RedisCallback<number>
+  ): Promise<void>;
+  async destroyUserDeviceSessions(
+    userId: number,
+    deviceId: string,
+    callback?: RedisCallback<number>
+  ): Promise<number | void> {
+    const userDeviceIndexKey = this.getUserDeviceIndexKey(userId, deviceId);
+
+    if (callback) {
+      try {
+        const sessionIds = (await this.redis.send("SMEMBERS", [
+          userDeviceIndexKey,
+        ])) as string[];
+
+        let deletedCount = 0;
+        for (const sessionId of sessionIds) {
+          const destroyed = await this.destroy(sessionId);
+          if (destroyed) {
+            deletedCount++;
+          }
+        }
+
+        await this.redis.del(userDeviceIndexKey);
+        callback(null, deletedCount);
+      } catch (error) {
+        callback(error as Error);
+      }
+      return;
+    }
+
+    const sessionIds = (await this.redis.send("SMEMBERS", [
+      userDeviceIndexKey,
+    ])) as string[];
+
+    let deletedCount = 0;
+    for (const sessionId of sessionIds) {
+      const destroyed = await this.destroy(sessionId);
+      if (destroyed) {
+        deletedCount++;
+      }
+    }
+
+    await this.redis.del(userDeviceIndexKey);
+    return deletedCount;
+  }
+
+  // Cleanup expired sessions và indexes
   async cleanup(): Promise<number>;
   async cleanup(callback: RedisCallback<number>): Promise<void>;
   async cleanup(callback?: RedisCallback<number>): Promise<number | void> {
@@ -374,17 +645,27 @@ export class SessionManager {
         let cleanedCount = 0;
 
         for (const key of keys) {
+          // Skip index keys
+          if (key.includes(":user:") || key.includes(":device:")) {
+            continue;
+          }
+
           const sessionData = await this.redis.get(key);
           if (sessionData) {
             try {
               const parsed = JSON.parse(sessionData) as SessionData;
-              if (parsed.expiresAt && Date.now() > parsed.expiresAt) {
-                await this.redis.del(key);
+              if (
+                parsed.expiresAt &&
+                getCurrentUnixTimestamp() > parsed.expiresAt
+              ) {
+                const sessionId = key.replace(this.prefix, "");
+                await this.destroy(sessionId); // Sử dụng destroy để xóa cả indexes
                 cleanedCount++;
               }
             } catch {
               // Clean up invalid session data
-              await this.redis.del(key);
+              const sessionId = key.replace(this.prefix, "");
+              await this.destroy(sessionId);
               cleanedCount++;
             }
           }
@@ -402,17 +683,27 @@ export class SessionManager {
     let cleanedCount = 0;
 
     for (const key of keys) {
+      // Skip index keys
+      if (key.includes(":user:") || key.includes(":device:")) {
+        continue;
+      }
+
       const sessionData = await this.redis.get(key);
       if (sessionData) {
         try {
           const parsed = JSON.parse(sessionData) as SessionData;
-          if (parsed.expiresAt && Date.now() > parsed.expiresAt) {
-            await this.redis.del(key);
+          if (
+            parsed.expiresAt &&
+            getCurrentUnixTimestamp() > parsed.expiresAt
+          ) {
+            const sessionId = key.replace(this.prefix, "");
+            await this.destroy(sessionId); // Sử dụng destroy để xóa cả indexes
             cleanedCount++;
           }
         } catch {
           // Clean up invalid session data
-          await this.redis.del(key);
+          const sessionId = key.replace(this.prefix, "");
+          await this.destroy(sessionId);
           cleanedCount++;
         }
       }

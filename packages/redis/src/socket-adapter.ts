@@ -2,17 +2,17 @@ import type { RedisClient } from "./redis-client";
 import type { LockOptions, RedisCallback } from "./types";
 
 export class SocketAdapter {
-  private redis: RedisClient;
-  private lockPrefix: string;
-  private channelPrefix: string;
+  private readonly redis: RedisClient;
+  private readonly lockPrefix: string;
+  private readonly channelPrefix: string;
 
   constructor(
     redis: RedisClient,
     options: { lockPrefix?: string; channelPrefix?: string } = {}
   ) {
     this.redis = redis;
-    this.lockPrefix = options.lockPrefix || "lock:";
-    this.channelPrefix = options.channelPrefix || "channel:";
+    this.lockPrefix = options.lockPrefix ?? "lock:";
+    this.channelPrefix = options.channelPrefix ?? "channel:";
   }
 
   private generateLockId(): string {
@@ -64,7 +64,7 @@ export class SocketAdapter {
         optionsOrCallback !== null &&
         !("length" in optionsOrCallback)
       ) {
-        options = optionsOrCallback as LockOptions;
+        options = optionsOrCallback;
         cb = callback;
       } else if (typeof optionsOrCallback === "function") {
         cb = optionsOrCallback;
@@ -78,8 +78,8 @@ export class SocketAdapter {
     const expireTimeMs = ttl;
     const expireTimeSec = Math.ceil(expireTimeMs / 1000);
 
-    const maxRetries = options.maxRetries || 3;
-    const retryDelay = options.retryDelay || 100;
+    const maxRetries = options.maxRetries ?? 3;
+    const retryDelay = options.retryDelay ?? 100;
 
     const tryAcquire = async (attempt: number = 0): Promise<string | null> => {
       try {
@@ -221,8 +221,8 @@ export class SocketAdapter {
         ]);
 
         callback(null, {
-          lockId: lockId as string | null,
-          ttl: ttl as number,
+          lockId: lockId,
+          ttl: ttl,
         });
       } catch (error) {
         callback(error as Error);
@@ -236,8 +236,8 @@ export class SocketAdapter {
     ]);
 
     return {
-      lockId: lockId as string | null,
-      ttl: ttl as number,
+      lockId: lockId,
+      ttl: ttl,
     };
   }
 
@@ -312,7 +312,7 @@ export class SocketAdapter {
     if (callback) {
       try {
         const result = await this.redis.del(lockKey);
-        callback(null, (result as number) > 0);
+        callback(null, result > 0);
       } catch (error) {
         callback(error as Error);
       }
@@ -320,7 +320,7 @@ export class SocketAdapter {
     }
 
     const result = await this.redis.del(lockKey);
-    return (result as number) > 0;
+    return result > 0;
   }
 
   // Execute with lock (automatically acquire and release)
@@ -367,7 +367,7 @@ export class SocketAdapter {
         optionsOrCallback !== null &&
         !("length" in optionsOrCallback)
       ) {
-        options = optionsOrCallback as LockOptions;
+        options = optionsOrCallback;
         cb = callback;
       } else if (typeof optionsOrCallback === "function") {
         cb = optionsOrCallback;
@@ -475,8 +475,8 @@ export class SocketAdapter {
             const resource = key.replace(this.lockPrefix, "");
             locks.push({
               resource,
-              lockId: lockId as string,
-              ttl: ttl as number,
+              lockId: lockId,
+              ttl: ttl,
             });
           }
         }
@@ -502,8 +502,8 @@ export class SocketAdapter {
         const resource = key.replace(this.lockPrefix, "");
         locks.push({
           resource,
-          lockId: lockId as string,
-          ttl: ttl as number,
+          lockId: lockId,
+          ttl: ttl,
         });
       }
     }

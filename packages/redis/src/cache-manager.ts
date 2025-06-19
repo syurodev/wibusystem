@@ -2,14 +2,14 @@ import type { RedisClient } from "./redis-client";
 import type { CacheOptions, RedisCallback } from "./types";
 
 export class CacheManager {
-  private redis: RedisClient;
-  private defaultTTL: number;
-  private namespace: string;
+  private readonly redis: RedisClient;
+  private readonly defaultTTL: number;
+  private readonly namespace: string;
 
   constructor(redis: RedisClient, options: CacheOptions = {}) {
     this.redis = redis;
-    this.defaultTTL = options.ttl || 3600; // 1 hour default
-    this.namespace = options.namespace || "cache:";
+    this.defaultTTL = options.ttl ?? 3600; // 1 hour default
+    this.namespace = options.namespace ?? "cache:";
   }
 
   private getKey(key: string): string {
@@ -111,7 +111,7 @@ export class CacheManager {
     }
 
     const result = await this.redis.del(cacheKey);
-    return (result as number) > 0;
+    return result > 0;
   }
 
   // Check if key exists
@@ -252,7 +252,7 @@ export class CacheManager {
       return 0;
     }
 
-    return (await this.redis.del(keys as string[])) as number;
+    return await this.redis.del(keys as string[]);
   }
 
   // Multi get - lấy nhiều keys cùng lúc
@@ -312,7 +312,7 @@ export class CacheManager {
       try {
         await Promise.all(
           entries.map((entry) =>
-            this.set(entry.key, entry.value, entry.ttl || this.defaultTTL)
+            this.set(entry.key, entry.value, entry.ttl ?? this.defaultTTL)
           )
         );
         callback(null);
@@ -324,7 +324,7 @@ export class CacheManager {
 
     await Promise.all(
       entries.map((entry) =>
-        this.set(entry.key, entry.value, entry.ttl || this.defaultTTL)
+        this.set(entry.key, entry.value, entry.ttl ?? this.defaultTTL)
       )
     );
   }

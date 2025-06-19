@@ -45,34 +45,89 @@ const user = await cache.get("user:123");
 
 ### Session Manager
 
+SessionManager hỗ trợ quản lý session theo cả **User ID** và **Device ID**, cho phép:
+
+- Tạo session với user ID (number) và device ID (string)
+- Quản lý sessions theo user hoặc device
+- Xóa sessions của user trên device cụ thể hoặc tất cả devices
+
 ```typescript
 import { SessionManager } from "@repo/redis";
 
 const sessions = new SessionManager(redis);
 
-// Tạo session
-const sessionId = await sessions.create("user123", { role: "admin" });
+// Tạo session với userId và deviceId
+const sessionId = await sessions.create(
+  123, // userId (number)
+  "device-mobile-001", // deviceId (string)
+  { role: "admin", loginTime: Date.now() } // additional data
+);
 
 // Lấy session
 const session = await sessions.get(sessionId);
 
-// Xóa session
+// Update session
+await sessions.update(sessionId, { lastActivity: Date.now() });
+
+// Quản lý sessions theo user
+const userSessions = await sessions.getUserSessions(123);
+await sessions.destroyUserSessions(123); // Xóa tất cả sessions của user
+
+// Quản lý sessions theo device
+const deviceSessions = await sessions.getDeviceSessions("device-mobile-001");
+await sessions.destroyDeviceSessions("device-mobile-001");
+
+// Quản lý sessions của user trên device cụ thể
+const userDeviceSessions = await sessions.getUserDeviceSessions(
+  123,
+  "device-mobile-001"
+);
+await sessions.destroyUserDeviceSessions(123, "device-mobile-001");
+
+// Xóa session cụ thể
 await sessions.destroy(sessionId);
 ```
 
 ### Rate Limiter
+
+RateLimiter đã được cải tiến với **Lua scripts** để đảm bảo atomic operations và hỗ trợ nhiều algorithms:
+
+#### 🔒 **Atomic Operations (Giải quyết Race Conditions)**
+
+- Sử dụng Lua scripts để thực hiện các operations nguyên tử
+- Không còn race conditions giữa INCR và EXPIRE
+- Thread-safe cho môi trường concurrent cao
+
+#### 📊 **Fixed Window Algorithm (Default)**
 
 ```typescript
 import { RateLimiter } from "@repo/redis";
 
 const limiter = new RateLimiter(redis);
 
-// Rate limit per IP
-const result = await limiter.checkLimit("192.168.1.1", 100, 3600); // 100 requests per hour
+// Rate limit per IP (Fixed window)
+const result = await limiter.checkLimit("192.168.1.1", 100, 3600000); // 100 requests/hour
 if (result.limited) {
   throw new Error("Rate limit exceeded");
 }
 ```
+
+#### 🌊 **Sliding Window Algorithm (More Accurate)**
+
+```typescript
+// Sliding window - chống burst traffic hiệu quả hơn
+const result = await limiter.checkSlidingWindowLimit("user:123", 10, 60000); // 10 requests/min
+if (result.limited) {
+  console.log(`Rate limited. Reset at: ${new Date(result.resetTime)}`);
+}
+```
+
+#### ⚡ **Performance Comparison**
+
+| Algorithm      | Accuracy | Memory Usage | Performance | Use Case                     |
+| -------------- | -------- | ------------ | ----------- | ---------------------------- |
+| Fixed Window   | Medium   | Low          | High        | General purpose              |
+| Sliding Window | High     | Medium       | Medium      | Anti-burst, precise limiting |
 
 ### Socket Adapter
 

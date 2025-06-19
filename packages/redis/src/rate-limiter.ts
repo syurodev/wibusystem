@@ -3,14 +3,82 @@ import type { RateLimitOptions, RateLimitResult, RedisCallback } from "./types";
 import { RateLimitError } from "./types";
 
 export class RateLimiter {
-  private redis: RedisClient;
-  private defaultWindowMs: number;
-  private prefix: string;
+  private readonly redis: RedisClient;
+  private readonly defaultWindowMs: number;
+  private readonly prefix: string;
+
+  // Lua script for atomic rate limiting (Fixed Window)
+  private readonly rateLimitScript = `
+    local key = KEYS[1]
+    local limit = tonumber(ARGV[1])
+    local window = tonumber(ARGV[2])
+    local now = tonumber(ARGV[3])
+    
+    -- Get current count
+    local current = redis.call('GET', key)
+    if current == false then
+      current = 0
+    else
+      current = tonumber(current)
+    end
+    
+    -- Check if limit exceeded
+    if current >= limit then
+      local ttl = redis.call('TTL', key)
+      if ttl == -1 then
+        ttl = window
+      end
+      return {current, ttl, now + (ttl * 1000), 1} -- {count, ttl, resetTime, limited}
+    end
+    
+    -- Increment counter
+    local newCount = redis.call('INCR', key)
+    
+    -- Set expiration if this is the first request
+    if newCount == 1 then
+      redis.call('EXPIRE', key, window)
+    end
+    
+    local ttl = redis.call('TTL', key)
+    return {newCount, ttl, now + (ttl * 1000), 0} -- {count, ttl, resetTime, limited}
+  `;
+
+  // Lua script for sliding window rate limiting (more accurate)
+  private readonly slidingWindowScript = `
+    local key = KEYS[1]
+    local limit = tonumber(ARGV[1])
+    local window = tonumber(ARGV[2])
+    local now = tonumber(ARGV[3])
+    local uuid = ARGV[4]
+    
+    -- Remove expired entries
+    redis.call('ZREMRANGEBYSCORE', key, 0, now - window)
+    
+    -- Count current requests
+    local current = redis.call('ZCARD', key)
+    
+    -- Check if limit exceeded
+    if current >= limit then
+      local earliest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+      local resetTime = now
+      if #earliest > 0 then
+        resetTime = tonumber(earliest[2]) + window
+      end
+      return {current, math.ceil((resetTime - now) / 1000), resetTime, 1}
+    end
+    
+    -- Add current request
+    redis.call('ZADD', key, now, uuid)
+    redis.call('EXPIRE', key, math.ceil(window / 1000) + 1)
+    
+    local newCount = redis.call('ZCARD', key)
+    return {newCount, math.ceil(window / 1000), now + window, 0}
+  `;
 
   constructor(redis: RedisClient, options: RateLimitOptions = {}) {
     this.redis = redis;
-    this.defaultWindowMs = options.windowMs || 3600000; // 1 hour default
-    this.prefix = options.prefix || "ratelimit:";
+    this.defaultWindowMs = options.windowMs ?? 3600000; // 1 hour default
+    this.prefix = options.prefix ?? "ratelimit:";
   }
 
   private getKey(identifier: string, windowStart: number): string {
@@ -21,7 +89,7 @@ export class RateLimiter {
     return Math.floor(Date.now() / windowMs) * windowMs;
   }
 
-  // Check rate limit
+  // Check rate limit with atomic Lua script
   async checkLimit(
     identifier: string,
     limit: number,
@@ -53,49 +121,107 @@ export class RateLimiter {
 
     const windowStart = this.getCurrentWindow(windowMs);
     const key = this.getKey(identifier, windowStart);
-    const expireTime = Math.ceil(windowMs / 1000);
+    const expireTimeSeconds = Math.ceil(windowMs / 1000);
+    const now = Date.now();
 
     try {
-      if (cb) {
-        // Callback mode
-        const current = await this.redis.incr(key);
+      // Sử dụng Lua script để đảm bảo atomic operation
+      const scriptResult = (await this.redis.send("EVAL", [
+        this.rateLimitScript,
+        "1", // Number of keys (as string)
+        key,
+        limit.toString(),
+        expireTimeSeconds.toString(),
+        now.toString(),
+      ])) as number[];
 
-        // Set expiration if this is the first request
-        if (current === 1) {
-          await this.redis.expire(key, expireTime);
-        }
-
-        const remaining = Math.max(0, limit - (current as number));
-        const resetTime = windowStart + windowMs;
-
-        const result: RateLimitResult = {
-          limited: (current as number) > limit,
-          remaining,
-          resetTime,
-          total: limit,
-        };
-
-        cb(null, result);
-        return;
-      }
-
-      // Promise mode
-      const current = await this.redis.incr(key);
-
-      // Set expiration if this is the first request
-      if (current === 1) {
-        await this.redis.expire(key, expireTime);
-      }
-
-      const remaining = Math.max(0, limit - (current as number));
-      const resetTime = windowStart + windowMs;
+      const [count = 0, ttl = 0, resetTime = now, limited = 0] =
+        scriptResult || [];
+      const remaining = Math.max(0, limit - count);
 
       const result: RateLimitResult = {
-        limited: (current as number) > limit,
+        limited: limited === 1,
         remaining,
         resetTime,
         total: limit,
       };
+
+      if (cb) {
+        cb(null, result);
+        return;
+      }
+
+      return result;
+    } catch (error) {
+      if (cb) {
+        cb(error as Error);
+        return;
+      }
+      throw error;
+    }
+  }
+
+  // Check rate limit with sliding window (more accurate, prevents burst)
+  async checkSlidingWindowLimit(
+    identifier: string,
+    limit: number,
+    windowMs?: number
+  ): Promise<RateLimitResult>;
+  async checkSlidingWindowLimit(
+    identifier: string,
+    limit: number,
+    callback: RedisCallback<RateLimitResult>
+  ): Promise<void>;
+  async checkSlidingWindowLimit(
+    identifier: string,
+    limit: number,
+    windowMs: number,
+    callback: RedisCallback<RateLimitResult>
+  ): Promise<void>;
+  async checkSlidingWindowLimit(
+    identifier: string,
+    limit: number,
+    windowMsOrCallback?: number | RedisCallback<RateLimitResult>,
+    callback?: RedisCallback<RateLimitResult>
+  ): Promise<RateLimitResult | void> {
+    const windowMs =
+      typeof windowMsOrCallback === "number"
+        ? windowMsOrCallback
+        : this.defaultWindowMs;
+    const cb =
+      typeof windowMsOrCallback === "function" ? windowMsOrCallback : callback;
+
+    const key = `${this.prefix}sliding:${identifier}`;
+    const now = Date.now();
+    // Tạo unique ID cho request này
+    const requestId = `${now}-${Math.random().toString(36).substring(2)}`;
+
+    try {
+      const scriptResult = (await this.redis.send("EVAL", [
+        this.slidingWindowScript,
+        "1",
+        key,
+        limit.toString(),
+        windowMs.toString(),
+        now.toString(),
+        requestId,
+      ])) as number[];
+
+      const [count = 0, ttl = 0, resetTime = now, limited = 0] =
+        scriptResult || [];
+      const remaining = Math.max(0, limit - count);
+
+      const result: RateLimitResult = {
+        limited: limited === 1,
+        remaining,
+        resetTime,
+        total: limit,
+      };
+
+      if (cb) {
+        cb(null, result);
+        return;
+      }
 
       return result;
     } catch (error) {
@@ -159,7 +285,7 @@ export class RateLimiter {
     try {
       const result = await this.checkLimit(identifier, limit, windowMs);
 
-      if (result && result.limited) {
+      if (result?.limited) {
         const rateLimitError = new (RateLimitError as any)(
           errorMessage,
           result.resetTime
@@ -255,7 +381,7 @@ export class RateLimiter {
     if (cb) {
       try {
         const result = await this.redis.del(key);
-        cb(null, (result as number) > 0);
+        cb(null, result > 0);
       } catch (error) {
         cb(error as Error);
       }
@@ -263,7 +389,7 @@ export class RateLimiter {
     }
 
     const result = await this.redis.del(key);
-    return (result as number) > 0;
+    return result > 0;
   }
 
   // Get multiple limits at once
@@ -310,7 +436,7 @@ export class RateLimiter {
       const resolvedResults = await Promise.all(promises);
 
       for (const { identifier, result } of resolvedResults) {
-        results[identifier] = result as RateLimitResult;
+        results[identifier] = result;
       }
 
       if (cb) {
@@ -401,7 +527,7 @@ export class RateLimiter {
       typeof windowMsOrCallback === "function" ? windowMsOrCallback : callback;
 
     const windowStart = this.getCurrentWindow(windowMs);
-    const key = this.getKey(identifier, windowStart);
+    // const key = this.getKey(identifier, windowStart);
 
     try {
       const current = await this.getCurrentCount(identifier, windowMs);

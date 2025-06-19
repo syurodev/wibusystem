@@ -1,3 +1,7 @@
+/**
+ * Auth service sử dụng Redis để cache token, manage session và rate limiting
+ */
+
 import {
   CacheManager,
   RateLimiter,
@@ -5,13 +9,8 @@ import {
   SessionManager,
 } from "@repo/redis";
 
-/**
- * Example sử dụng Redis package trong Auth App
- * Demonstrates caching token info, rate limiting, and session management
- */
-
 interface TokenData {
-  userId: string;
+  userId: number;
   email: string;
   role: string;
   permissions: string[];
@@ -19,7 +18,7 @@ interface TokenData {
 }
 
 interface UserProfile {
-  id: string;
+  id: number;
   email: string;
   name: string;
   role: string;
@@ -33,27 +32,33 @@ class AuthService {
   private rateLimiter: RateLimiter;
 
   constructor() {
-    // Initialize Redis client
     this.redis = new RedisClient({
-      url: process.env.REDIS_URL || "redis://localhost:6379",
-      maxConnections: 20,
+      url: "redis://localhost:6379",
+      maxConnections: 10,
     });
 
-    // Initialize managers
-    this.cache = new CacheManager(this.redis, {
-      namespace: "auth:cache:",
-      ttl: 900, // 15 minutes default
+    this.cache = new CacheManager(this.redis);
+    this.sessions = new SessionManager(this.redis);
+    this.rateLimiter = new RateLimiter(this.redis);
+
+    this.setupEventListeners();
+  }
+
+  private setupEventListeners(): void {
+    this.redis.on("error", (error) => {
+      console.error("Redis connection error:", error);
     });
 
-    this.sessions = new SessionManager(this.redis, {
-      prefix: "auth:session:",
-      ttl: 86400, // 24 hours
+    this.redis.on("connect", () => {
+      console.log("Connected to Redis");
     });
+  }
 
-    this.rateLimiter = new RateLimiter(this.redis, {
-      prefix: "auth:limit:",
-      windowMs: 900000, // 15 minutes
-    });
+  /**
+   * Rate limiting cho authentication endpoint
+   */
+  private async setupAuthRateLimit(): Promise<void> {
+    // Rate limiting sẽ được setup trong checkLoginRateLimit method
   }
 
   /**
@@ -115,25 +120,25 @@ class AuthService {
    * Create login session
    */
   async createLoginSession(
-    userId: string,
+    userId: number,
+    deviceId: string,
     userAgent: string,
     ip: string
   ): Promise<string> {
     const sessionData = {
-      userId,
       userAgent,
       ip,
       loginTime: Date.now(),
       lastActivity: Date.now(),
     };
 
-    return await this.sessions.create(userId, sessionData);
+    return await this.sessions.create(userId, deviceId, sessionData);
   }
 
   /**
    * Cache user profile
    */
-  async getUserProfile(userId: string): Promise<UserProfile | null> {
+  async getUserProfile(userId: number): Promise<UserProfile | null> {
     const cacheKey = `profile:${userId}`;
 
     // Check cache first
@@ -157,7 +162,7 @@ class AuthService {
   /**
    * Invalidate user cache when profile updates
    */
-  async invalidateUserCache(userId: string): Promise<void> {
+  async invalidateUserCache(userId: number): Promise<void> {
     await Promise.all([
       this.cache.del(`profile:${userId}`),
       this.cache.del(`permissions:${userId}`),
@@ -183,20 +188,25 @@ class AuthService {
   /**
    * Check for suspicious activity
    */
-  async checkSuspiciousActivity(userId: string): Promise<boolean> {
+  async checkSuspiciousActivity(userId: number): Promise<boolean> {
     const sessions = await this.sessions.getUserSessions(userId);
 
-    // Check for multiple active sessions from different IPs
-    const uniqueIPs = new Set(sessions.map((s) => s.data.ip));
-
-    if (uniqueIPs.size > 3) {
+    // Check for multiple active sessions
+    if (sessions.length > 5) {
       console.log(
-        `Suspicious activity detected for user ${userId}: ${uniqueIPs.size} different IPs`
+        `Suspicious activity detected for user ${userId}: ${sessions.length} active sessions`
       );
       return true;
     }
 
     return false;
+  }
+
+  /**
+   * Logout user from all devices
+   */
+  async logoutFromAllDevices(userId: number): Promise<number> {
+    return await this.sessions.destroyUserSessions(userId);
   }
 
   /**
@@ -223,7 +233,7 @@ class AuthService {
     // Mock token data
     if (token === "valid-token-123") {
       return {
-        userId: "user-123",
+        userId: 123,
         email: "user@example.com",
         role: "admin",
         permissions: ["read", "write", "delete"],
@@ -235,7 +245,7 @@ class AuthService {
   }
 
   private async fetchUserProfileFromDatabase(
-    userId: string
+    userId: number
   ): Promise<UserProfile | null> {
     // Simulate network delay
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -252,59 +262,54 @@ class AuthService {
 }
 
 // Example usage
-async function authAppExample() {
+async function demonstrateAuthService() {
   const authService = new AuthService();
+  const userId = 123;
+  const deviceId = "device-mobile-001";
 
-  console.log("=== Auth App Redis Usage Example ===\n");
+  try {
+    // Test rate limiting
+    const canLogin = await authService.checkLoginRateLimit("user@example.com");
+    if (!canLogin) {
+      console.log("Login rate limited");
+      return;
+    }
 
-  // 1. Check rate limit for login
-  const canLogin = await authService.checkLoginRateLimit("user@example.com");
-  console.log("Can login:", canLogin);
-
-  if (canLogin) {
-    // 2. Validate token
+    // Validate token
     const tokenData = await authService.validateToken("valid-token-123");
     console.log("Token validation result:", tokenData);
 
-    if (tokenData) {
-      // 3. Create session
-      const sessionId = await authService.createLoginSession(
-        tokenData.userId,
-        "Mozilla/5.0 Chrome/91.0",
-        "192.168.1.100"
-      );
-      console.log("Session created:", sessionId);
+    // Create session
+    const sessionId = await authService.createLoginSession(
+      userId,
+      deviceId,
+      "Mozilla/5.0...",
+      "192.168.1.1"
+    );
+    console.log("Session created:", sessionId);
 
-      // 4. Get user profile (will cache)
-      const profile1 = await authService.getUserProfile(tokenData.userId);
-      console.log("Profile (first fetch):", profile1);
+    // Get user profile
+    const profile = await authService.getUserProfile(userId);
+    console.log("User profile:", profile);
 
-      // 5. Get user profile again (from cache)
-      const profile2 = await authService.getUserProfile(tokenData.userId);
-      console.log("Profile (from cache):", profile2);
+    // Check for suspicious activity
+    const suspicious = await authService.checkSuspiciousActivity(userId);
+    console.log("Suspicious activity:", suspicious);
 
-      // 6. Check suspicious activity
-      const suspicious = await authService.checkSuspiciousActivity(
-        tokenData.userId
-      );
-      console.log("Suspicious activity:", suspicious);
+    // Logout from all devices
+    const loggedOutSessions = await authService.logoutFromAllDevices(userId);
+    console.log("Logged out sessions:", loggedOutSessions);
 
-      // 7. Invalidate cache
-      await authService.invalidateUserCache(tokenData.userId);
-    }
+    // Cleanup
+    await authService.cleanupExpiredData();
+  } catch (error) {
+    console.error("Error in auth service demo:", error);
   }
-
-  // 8. Check password reset rate limit
-  const canResetPassword =
-    await authService.checkPasswordResetRateLimit("user@example.com");
-  console.log("Can reset password:", canResetPassword);
-
-  // 9. Cleanup expired data
-  await authService.cleanupExpiredData();
-
-  console.log("\n✅ Auth app example completed!");
 }
 
-if (import.meta.main) {
-  authAppExample().catch(console.error);
+// Run demonstration
+if (require.main === module) {
+  demonstrateAuthService().catch(console.error);
 }
+
+export { AuthService };

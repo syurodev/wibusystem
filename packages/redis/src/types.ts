@@ -42,7 +42,8 @@ export interface CacheOptions {
 
 // Session types
 export interface SessionData {
-  userId: string;
+  userId: number;
+  deviceId: string;
   data: Record<string, any>;
   createdAt: number;
   expiresAt?: number;

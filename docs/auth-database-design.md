@@ -126,7 +126,7 @@ CREATE TABLE users (
     display_name VARCHAR(255) NOT NULL DEFAULT '',             -- Tên hiển thị, dùng để hiển thị trên UI
     avatar_url TEXT NOT NULL DEFAULT '',                       -- URL ảnh đại diện
     cover_url TEXT NOT NULL DEFAULT '',                        -- URL ảnh bìa
-    bio VARCHAR(255) NOT NULL DEFAULT '',                      -- Tiểu sử, giới thiệu ngắn về người dùng
+    bio JSONB NOT NULL DEFAULT {},                              -- Tiểu sử, giới thiệu ngắn về người dùng
     gender SMALLINT NOT NULL DEFAULT 0,                        -- Giới tính: 0: khác, 1: nam, 2: nữ
     date_of_birth BIGINT NOT NULL DEFAULT 0,                   -- Ngày sinh, lưu dạng timestamp (unix time)
     metadata JSONB NOT NULL DEFAULT '{}',                      -- Dữ liệu mở rộng, lưu các thông tin bổ sung

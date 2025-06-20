@@ -1,12 +1,14 @@
+import { getCurrentUnixTimestamp } from "@repo/utils";
+
 /**
  * Base interface cho tất cả models với các cột cố định
  */
 export interface BaseModel {
-  id: bigint;
-  created_at: bigint;
-  updated_at: bigint;
-  version: number;
-  lasted_user_modified: bigint;
+  id: string | number;
+  created_at: string | number;
+  updated_at: string | number;
+  version?: number;
+  lasted_user_modified?: bigint;
 }
 
 /**
@@ -37,7 +39,7 @@ export function withBaseFields<T>(
   userId: bigint
 ): CreateModel<T & BaseModel> &
   Pick<BaseModel, "created_at" | "updated_at" | "lasted_user_modified"> {
-  const timestamp = now();
+  const timestamp = getCurrentUnixTimestamp();
   return {
     ...data,
     created_at: timestamp,

@@ -29,7 +29,7 @@ export type UpdateModel<T extends BaseModel> = Partial<
 /**
  * Utility để tạo timestamp hiện tại
  */
-export const now = (): bigint => BigInt(Date.now());
+export const now = (): bigint => BigInt(getCurrentUnixTimestamp());
 
 /**
  * Utility để tạo data cho insert với base fields

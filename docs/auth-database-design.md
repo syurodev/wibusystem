@@ -162,8 +162,6 @@ ALTER TABLE users ADD CONSTRAINT chk_users_gender CHECK (gender >= 0 AND gender 
 
 **Mục đích**: Quản lý API keys cho các ứng dụng third-party và developer tools.
 
-#### Drizzle Schema
-
 #### SQL DDL
 
 ```sql
@@ -221,6 +219,7 @@ CREATE TABLE sessions (
     -- Device information
     device_id VARCHAR(255) NOT NULL DEFAULT '',                 -- UUID thiết bị do client tạo
     device_fingerprint TEXT NOT NULL DEFAULT '',               -- Fingerprint để phát hiện duplicate
+    device_token TEXT NOT NULL DEFAULT '',
     device_name VARCHAR(255) NOT NULL DEFAULT '',              -- Tên thiết bị
     device_type VARCHAR(50) NOT NULL DEFAULT '',               -- mobile, tablet, desktop
     device_os VARCHAR(255) NOT NULL DEFAULT '',                -- Hệ điều hành
@@ -247,6 +246,7 @@ CREATE TABLE sessions (
     blocked_reason VARCHAR(255) NOT NULL DEFAULT '',           -- Lý do block
 
     -- Time management
+    lasted_user_modified BIGINT NOT NULL DEFAULT 0,
     expires_at BIGINT NOT NULL DEFAULT 0,                      -- Thời gian hết hạn phiên
     revoked_at BIGINT NOT NULL DEFAULT 0,                      -- Thời gian thu hồi phiên
     versions INTEGER NOT NULL DEFAULT 0,                       -- Phiên bản update
@@ -388,7 +388,6 @@ CREATE TABLE organizations (
     versions INTEGER NOT NULL DEFAULT 0,                       -- Phiên bản update
 
     -- Timestamps
-    versions INTEGER NOT NULL DEFAULT 0,                       -- Phiên bản update
     created_at BIGINT NOT NULL DEFAULT 0,                      -- Thời gian tạo, dạng unix time
     updated_at BIGINT NOT NULL DEFAULT 0                       -- Thời gian cập nhật gần nhất, dạng unix time
 );

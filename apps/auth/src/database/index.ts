@@ -1,5 +1,6 @@
 import { PostgresConnectionManager } from "@repo/database";
 import { PG_CONFIG } from "../configs";
+import { SessionRepository } from "./repositories/session.repository";
 import { UserRepository } from "./repositories/user.repository";
 
 // Khởi tạo PostgreSQL connection
@@ -22,6 +23,7 @@ export { postgresManager };
 
 // Khởi tạo repositories với SQL connection
 export const userRepository = new UserRepository(sql);
+export const sessionRepository = new SessionRepository(sql);
 
 // Test connection function
 export async function testDatabaseConnection(): Promise<boolean> {

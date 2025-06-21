@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import { authController } from "./auth/controllers/auth.controller";
+import { authController } from "./auth";
 
 /**
  * Tất cả các routes cho API v1

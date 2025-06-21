@@ -1,0 +1,4 @@
+export const API_SECURITY = {
+  NONE: "NONE",
+  TOKEN_REQUIRED: "TOKEN_REQUIRED",
+};

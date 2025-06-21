@@ -3,6 +3,7 @@ export const SERVICE_CONFIG = {
   SERVICE_PORT: process.env.SERVICE_PORT ?? 3101,
   SERVICE_GRPC_PORT: process.env.SERVICE_GRPC_PORT ?? 31001,
   NODE_ENV: process.env.NODE_ENV ?? "development",
+  DATA_ENCRYPT_SECRET_KEY: process.env.DATA_ENCRYPT_SECRET_KEY ?? "",
 };
 
 export const PG_CONFIG = {

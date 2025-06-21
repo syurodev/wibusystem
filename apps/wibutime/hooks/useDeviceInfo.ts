@@ -1,5 +1,6 @@
 "use client";
 
+import { encryptDeviceData, generateSecretKey } from "@repo/utils";
 import { useEffect, useState } from "react";
 
 export interface DeviceInfo {
@@ -60,6 +61,19 @@ export interface DeviceInfo {
     downlink: number;
     rtt: number;
     saveData: boolean;
+  };
+
+  // IP Information
+  ip?: {
+    public: string;
+    country?: string;
+    region?: string;
+    city?: string;
+    timezone?: string;
+    isp?: string;
+    org?: string;
+    as?: string;
+    query?: string;
   };
 
   // Battery Information
@@ -223,6 +237,64 @@ const checkFeatureSupport = () => {
 };
 
 /**
+ * Lấy thông tin IP public từ các API miễn phí
+ * @returns Promise<object | null> - Thông tin IP hoặc null nếu có lỗi
+ */
+const getPublicIPInfo = async (): Promise<any> => {
+  // Danh sách các API backup (theo thứ tự ưu tiên)
+  const ipApis = [
+    {
+      url: "http://ip-api.com/json",
+      transform: (data: any) => ({
+        public: data.query,
+        country: data.country,
+        region: data.regionName,
+        city: data.city,
+        timezone: data.timezone,
+        isp: data.isp,
+        org: data.org,
+        as: data.as,
+        query: data.query,
+      }),
+    },
+    {
+      url: "https://api.ipify.org?format=json",
+      transform: (data: any) => ({
+        public: data.ip,
+        query: data.ip,
+      }),
+    },
+  ];
+
+  for (const api of ipApis) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
+      const response = await fetch(api.url, {
+        signal: controller.signal,
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        return api.transform(data);
+      }
+    } catch (error) {
+      console.warn(`Failed to fetch IP from ${api.url}:`, error);
+      continue; // Thử API tiếp theo
+    }
+  }
+
+  console.warn("All IP API services failed");
+  return null;
+};
+
+/**
  * Tạo device fingerprint từ thông tin thiết bị
  * @param deviceInfo - Thông tin thiết bị từ useDeviceInfo hook
  * @returns string - Device fingerprint hash
@@ -254,6 +326,10 @@ export const generateDeviceFingerprint = (deviceInfo: DeviceInfo): string => {
     language: deviceInfo.browser.language,
     languages: deviceInfo.browser.languages.join(","),
     cookieEnabled: deviceInfo.browser.cookieEnabled,
+
+    // IP Information (optional - for enhanced security)
+    publicIP: deviceInfo.ip?.public || "",
+    country: deviceInfo.ip?.country || "",
 
     // Web Features (very unique)
     webGL: deviceInfo.features.webGL,
@@ -342,7 +418,220 @@ export const generateEnhancedFingerprint = (deviceInfo: DeviceInfo): string => {
 };
 
 /**
- * Hook để tự động tạo device fingerprint
+ * Strategy cho hybrid device fingerprinting
+ */
+export interface FingerprintStrategy {
+  client: {
+    basic: string; // Basic fingerprint cho immediate use
+    enhanced: string; // Enhanced fingerprint với WebGL/Canvas
+    timestamp: number; // Thời gian tạo
+  };
+  server?: {
+    fingerprint: string; // Server-generated fingerprint
+    confidence: number; // Độ tin cậy (0-1)
+    additional: any; // Thông tin bổ sung từ server
+  };
+}
+
+/**
+ * Tạo fingerprint data để gửi lên server
+ * @param deviceInfo - Device information
+ * @returns object chứa data cần thiết cho server
+ */
+export const prepareServerFingerprintData = (deviceInfo: DeviceInfo) => {
+  return {
+    // Core device info (stable & unique)
+    device: {
+      screenWidth: deviceInfo.screen.width,
+      screenHeight: deviceInfo.screen.height,
+      colorDepth: deviceInfo.screen.colorDepth,
+      devicePixelRatio: deviceInfo.screen.devicePixelRatio,
+      concurrency: deviceInfo.hardware.concurrency,
+      memory: deviceInfo.hardware.memory,
+      maxTouchPoints: deviceInfo.hardware.maxTouchPoints,
+      platform: deviceInfo.os.platform,
+      language: deviceInfo.browser.language,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    },
+
+    // IP Information (for location and security)
+    ip: deviceInfo.ip
+      ? {
+          public: deviceInfo.ip.public,
+          country: deviceInfo.ip.country,
+          region: deviceInfo.ip.region,
+          city: deviceInfo.ip.city,
+          timezone: deviceInfo.ip.timezone,
+          isp: deviceInfo.ip.isp,
+        }
+      : null,
+
+    // Features (for validation)
+    features: {
+      webGL: deviceInfo.features.webGL,
+      canvas: deviceInfo.features.canvas,
+      localStorage: deviceInfo.features.localStorage,
+      touchDevice: deviceInfo.device.isTouchDevice,
+    },
+
+    // Client-generated fingerprints (for comparison)
+    clientFingerprints: {
+      basic: generateDeviceFingerprint(deviceInfo),
+      enhanced: generateEnhancedFingerprint(deviceInfo),
+    },
+
+    // Metadata
+    timestamp: Date.now(),
+    userAgent: deviceInfo.browser.userAgent,
+  };
+};
+
+/**
+ * Tạo encrypted fingerprint data để gửi lên server một cách an toàn
+ * @param deviceInfo - Device information
+ * @param secretKey - Secret key for encryption
+ * @returns Promise<object> - Encrypted data ready to send to server
+ */
+export const prepareEncryptedFingerprintData = async (
+  deviceInfo: DeviceInfo,
+  secretKey: string
+) => {
+  // Tạo secret key từ base key và environment
+  const environment = process.env.NODE_ENV || "development";
+  const finalSecretKey = generateSecretKey(secretKey, environment);
+
+  // Prepare basic data
+  const basicData = prepareServerFingerprintData(deviceInfo);
+
+  // Encrypt sensitive data
+  const encryptedResult = await encryptDeviceData(basicData, {
+    secretKey: finalSecretKey,
+    useTimestamp: true,
+    expirationMinutes: 60, // 1 hour expiration
+  });
+
+  return {
+    // Public metadata (không sensitive)
+    meta: {
+      timestamp: encryptedResult.timestamp,
+      method: encryptedResult.method,
+      version: "1.0.0",
+    },
+
+    // Encrypted payload
+    payload: encryptedResult.data,
+
+    // Optional: Include non-sensitive info for server-side validation
+    hints: {
+      deviceType: deviceInfo.device.type,
+      hasIP: !!deviceInfo.ip,
+      browserName: deviceInfo.browser.name,
+      platform: deviceInfo.os.name,
+    },
+  };
+};
+
+/**
+ * Hook cho hybrid fingerprinting strategy
+ */
+export const useHybridFingerprint = () => {
+  const deviceInfo = useDeviceInfo();
+  const [strategy, setStrategy] = useState<FingerprintStrategy>({
+    client: {
+      basic: "",
+      enhanced: "",
+      timestamp: 0,
+    },
+  });
+
+  // Tạo client-side fingerprint ngay lập tức
+  useEffect(() => {
+    if (deviceInfo.browser.userAgent) {
+      const basic = generateDeviceFingerprint(deviceInfo);
+      const enhanced = generateEnhancedFingerprint(deviceInfo);
+
+      setStrategy((prev) => ({
+        ...prev,
+        client: {
+          basic,
+          enhanced,
+          timestamp: Date.now(),
+        },
+      }));
+    }
+  }, [deviceInfo]);
+
+  // Function để gửi data lên server và nhận server fingerprint
+  const syncWithServer = async (apiEndpoint: string) => {
+    try {
+      const serverData = prepareServerFingerprintData(deviceInfo);
+
+      const response = await fetch(apiEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(serverData),
+      });
+
+      if (response.ok) {
+        const serverResult = await response.json();
+
+        setStrategy((prev) => ({
+          ...prev,
+          server: {
+            fingerprint: serverResult.fingerprint,
+            confidence: serverResult.confidence || 1,
+            additional: serverResult.additional || {},
+          },
+        }));
+
+        return serverResult;
+      }
+    } catch (error) {
+      console.warn("Server fingerprinting failed:", error);
+    }
+
+    return null;
+  };
+
+  return {
+    strategy,
+    deviceInfo,
+
+    // Client fingerprints (available immediately)
+    clientFingerprint: strategy.client.basic,
+    enhancedFingerprint: strategy.client.enhanced,
+
+    // Server sync
+    syncWithServer,
+    prepareServerData: () => prepareServerFingerprintData(deviceInfo),
+
+    // Best fingerprint (prefer server if available)
+    getBestFingerprint: () => {
+      return (
+        strategy.server?.fingerprint ||
+        strategy.client.enhanced ||
+        strategy.client.basic
+      );
+    },
+
+    // Validation helpers
+    isConsistent: () => {
+      if (!strategy.server) return true;
+
+      // So sánh client vs server fingerprints
+      const clientHash = strategy.client.basic;
+      const serverHash = strategy.server.fingerprint;
+
+      // Simple similarity check (có thể improve)
+      return clientHash === serverHash || strategy.server.confidence > 0.8;
+    },
+  };
+};
+
+/**
+ * Hook để tự động tạo device fingerprint (backward compatibility)
  * @returns object chứa deviceInfo và fingerprint
  */
 export const useDeviceFingerprint = () => {
@@ -368,6 +657,42 @@ export const useDeviceFingerprint = () => {
     // Utility functions
     generateFingerprint: () => generateDeviceFingerprint(deviceInfo),
     generateEnhancedFingerprint: () => generateEnhancedFingerprint(deviceInfo),
+  };
+};
+
+/**
+ * Hook chỉ để lấy thông tin IP (lightweight)
+ * @returns object chứa IP information và loading state
+ */
+export const useIPInfo = () => {
+  const [ipInfo, setIPInfo] = useState<DeviceInfo["ip"] | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchIPInfo = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const info = await getPublicIPInfo();
+      setIPInfo(info);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch IP info");
+      setIPInfo(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchIPInfo();
+  }, []);
+
+  return {
+    ipInfo,
+    loading,
+    error,
+    refetch: fetchIPInfo,
   };
 };
 
@@ -536,8 +861,25 @@ export const useDeviceInfo = (): DeviceInfo => {
     }
   };
 
+  const updateIPInfo = async () => {
+    try {
+      const ipInfo = await getPublicIPInfo();
+      if (ipInfo) {
+        setDeviceInfo((prev) => ({
+          ...prev,
+          ip: ipInfo,
+        }));
+      }
+    } catch (error) {
+      console.warn("Error getting IP info:", error);
+    }
+  };
+
   useEffect(() => {
     updateDeviceInfo();
+
+    // Lấy thông tin IP (không đồng bộ)
+    updateIPInfo();
 
     const handleResize = () => {
       setDeviceInfo((prev) => ({

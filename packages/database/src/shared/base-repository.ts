@@ -152,8 +152,12 @@ export abstract class BaseRepository<T extends BaseModel> {
   /**
    * Tạo record mới
    */
-  async create(data: CreateModel<T>, userId: bigint, tx?: any): Promise<T> {
-    const insertData = withBaseFields(data, userId);
+  async create(
+    data: CreateModel<T>,
+    userId: number | string,
+    tx?: any
+  ): Promise<T> {
+    const insertData = withBaseFields(data, BigInt(userId));
     const sqlInstance = tx ?? this.sql;
 
     const result = (await sqlInstance`
@@ -169,11 +173,11 @@ export abstract class BaseRepository<T extends BaseModel> {
    */
   async createMany(
     dataArray: CreateModel<T>[],
-    userId: bigint,
+    userId: number | string,
     tx?: any
   ): Promise<T[]> {
     const insertDataArray = dataArray.map((data) =>
-      withBaseFields(data, userId)
+      withBaseFields(data, BigInt(userId))
     );
     const sqlInstance = tx ?? this.sql;
 
@@ -211,10 +215,10 @@ export abstract class BaseRepository<T extends BaseModel> {
   async updateWhere(
     conditions: WhereCondition,
     data: UpdateModel<T>,
-    userId: bigint,
+    userId: number | string,
     tx?: any
   ): Promise<T[]> {
-    const updateData = withUpdateFields(data, userId);
+    const updateData = withUpdateFields(data, BigInt(userId));
     const sqlInstance = tx ?? this.sql;
     const whereClause = this.buildWhereClause(conditions);
 
@@ -232,11 +236,11 @@ export abstract class BaseRepository<T extends BaseModel> {
   async upsert(
     data: CreateModel<T>,
     conflictColumns: string[],
-    userId: bigint,
+    userId: number | string,
     tx?: any
   ): Promise<T> {
-    const insertData = withBaseFields(data, userId);
-    const updateData = withUpdateFields(data as any, userId);
+    const insertData = withBaseFields(data, BigInt(userId));
+    const updateData = withUpdateFields(data as any, BigInt(userId));
     const sqlInstance = tx ?? this.sql;
 
     const conflictClause = conflictColumns.join(", ");
